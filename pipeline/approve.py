@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from auth.shopify_token import get_token
 from listing.listing_generator import generate_listing
 from listing.image_processor import download_images
 from listing.shopify_publisher import create_draft
@@ -58,6 +59,7 @@ def _process(product: dict):
 
 
 def run(queue_date: str, indices: list[int] | None = None):
+    get_token()
     products = _load_queue(queue_date)
 
     if indices is None:

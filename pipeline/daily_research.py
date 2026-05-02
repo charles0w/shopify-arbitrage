@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config.settings import MAX_QUEUE_SIZE
 from research.product_scorer import research_all_niches
+from auth.shopify_token import get_token
 
 QUEUE_DIR = Path(__file__).parent.parent / "queue"
 QUEUE_DIR.mkdir(exist_ok=True)
@@ -29,6 +30,7 @@ def run():
     json_path = QUEUE_DIR / f"{today}.json"
     md_path = QUEUE_DIR / f"{today}.md"
 
+    get_token()  # refresh Shopify token before any API calls
     print(f"[daily_research] Starting niche research — {today}")
     products = research_all_niches(top_n=3)
     top = products[:MAX_QUEUE_SIZE]
