@@ -18,3 +18,5 @@ token.json
 .env.local
 .env.production
 .token_cache.json
+.cj_token_cache.json
+.ae_token_cache.json

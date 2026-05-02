@@ -1,150 +1,141 @@
 """
-Fetch product listings from AliExpress via the official Affiliate Open Platform API.
-Docs: https://developers.aliexpress.com/
+Fetch product listings from CJDropshipping API.
+US warehouse products = 5-7 day delivery to US customers.
 
 Requires in .env:
-  ALIEXPRESS_APP_KEY
-  ALIEXPRESS_APP_SECRET
+  CJ_EMAIL
+  CJ_PASSWORD
 
-Each returned product dict has:
-  id, title, supplier_price_usd, shipping_weight_lbs,
-  review_count, orders_count, image_urls, product_url
+Docs: https://developers.cjdropshipping.com/
 """
 import os
 import time
-import hmac
-import hashlib
 import json
 import requests
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_APP_KEY = os.environ.get("ALIEXPRESS_APP_KEY", "")
-_APP_SECRET = os.environ.get("ALIEXPRESS_APP_SECRET", "")
-_BASE_URL = "https://api-sg.aliexpress.com/sync"
+_API_KEY = os.environ.get("CJ_API_KEY", "")
+_BASE = "https://developers.cjdropshipping.com/api2.0/v1"
+_CACHE = Path(__file__).parent.parent / ".cj_token_cache.json"
 
 
-def _sign(params: dict) -> str:
-    """Generate HMAC-SHA256 signature required by AliExpress Open API."""
-    sorted_params = sorted(params.items())
-    sign_string = _APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params) + _APP_SECRET
-    return hmac.new(
-        _APP_SECRET.encode("utf-8"),
-        sign_string.encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest().upper()
+def _get_token() -> str:
+    """Return a valid CJ access token, refreshing if expired."""
+    if _CACHE.exists():
+        with open(_CACHE) as f:
+            cached = json.load(f)
+        if time.time() < cached.get("expires_at", 0) - 300:
+            return cached["accessToken"]
 
+    if not _API_KEY:
+        raise EnvironmentError("CJ_API_KEY not set in .env")
 
-def _call(method: str, extra_params: dict) -> dict:
-    """Make a signed API call. Returns the parsed JSON response."""
-    params = {
-        "method": method,
-        "app_key": _APP_KEY,
-        "timestamp": str(int(time.time() * 1000)),
-        "sign_method": "sha256",
-        "format": "json",
-        "v": "2.0",
-        **extra_params,
-    }
-    params["sign"] = _sign(params)
-    resp = requests.get(_BASE_URL, params=params, timeout=20)
+    resp = requests.post(
+        f"{_BASE}/authentication/getAccessToken",
+        json={"apiKey": _API_KEY},
+        timeout=15,
+    )
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+
+    if not data.get("result"):
+        raise RuntimeError(f"CJ auth failed: {data.get('message')}")
+
+    token_data = data["data"]
+    token_data["expires_at"] = time.time() + 86400 * 14  # tokens valid ~2 weeks
+    with open(_CACHE, "w") as f:
+        json.dump(token_data, f)
+
+    return token_data["accessToken"]
+
+
+def _headers() -> dict:
+    return {"CJ-Access-Token": _get_token()}
 
 
 def search_products(keyword: str, max_results: int = 20) -> list[dict]:
-    """Search AliExpress affiliate products by keyword."""
-    if not _APP_KEY or not _APP_SECRET:
-        raise EnvironmentError(
-            "ALIEXPRESS_APP_KEY and ALIEXPRESS_APP_SECRET not set in .env. "
-            "Sign up at portals.aliexpress.com and apply for API access."
-        )
+    """Search CJDropshipping products by keyword."""
+    resp = requests.get(
+        f"{_BASE}/product/list",
+        headers=_headers(),
+        params={
+            "productName": keyword,
+            "pageNum": 1,
+            "pageSize": min(max_results, 50),
+        },
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
 
-    data = _call("aliexpress.affiliate.product.query", {
-        "keywords": keyword,
-        "page_no": 1,
-        "page_size": min(max_results, 50),
-        "sort": "SALE_PRICE_ASC",
-        "target_currency": "USD",
-        "target_language": "EN",
-        "tracking_id": "default",
-        "fields": "product_id,product_title,sale_price,original_price,"
-                  "evaluate_rate,lastest_volume,product_main_image_url,"
-                  "product_detail_url,second_level_category_name",
-    })
+    if not data.get("result"):
+        print(f"  [CJ] no results for '{keyword}': {data.get('message')}")
+        return []
 
-    resp_key = "aliexpress_affiliate_product_query_response"
-    products_data = (
-        data.get(resp_key, {})
-            .get("resp_result", {})
-            .get("result", {})
-            .get("products", {})
-            .get("product", [])
-    ) or []
-
-    products = []
-    for p in products_data[:max_results]:
-        try:
-            price = float(str(p.get("sale_price", "0")).replace("$", "").strip())
-        except ValueError:
-            price = 0.0
-
-        products.append({
-            "id": str(p.get("product_id", "")),
-            "title": p.get("product_title", ""),
-            "supplier_price_usd": price,
-            "shipping_weight_lbs": None,
-            "review_count": float(str(p.get("evaluate_rate", "0")).replace("%", "") or 0),
-            "orders_count": int(p.get("lastest_volume", 0) or 0),
-            "image_urls": [p.get("product_main_image_url", "")],
-            "product_url": p.get("product_detail_url", ""),
-        })
-
-    return products
+    items = data.get("data", {}).get("list", []) or []
+    return [_parse_product(p, keyword) for p in items[:max_results]]
 
 
 def get_product_detail(product_id: str) -> dict:
-    """Fetch additional detail for a single product."""
-    if not _APP_KEY or not _APP_SECRET:
+    """Fetch full detail for a single CJ product."""
+    resp = requests.get(
+        f"{_BASE}/product/query",
+        headers=_headers(),
+        params={"pid": product_id},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+
+    if not data.get("result"):
         return {}
 
-    data = _call("aliexpress.affiliate.productdetail.get", {
-        "product_ids": product_id,
-        "target_currency": "USD",
-        "target_language": "EN",
-        "tracking_id": "default",
-        "fields": "product_id,product_main_image_url,product_video,detail",
-    })
+    p = data.get("data", {})
+    images = [v.get("imageUrl", "") for v in p.get("productImageSet", []) if v.get("imageUrl")]
+    weight_g = None
+    for variant in p.get("variants", []):
+        if variant.get("variantWeight"):
+            try:
+                weight_g = float(variant["variantWeight"])
+                break
+            except ValueError:
+                pass
 
-    resp_key = "aliexpress_affiliate_productdetail_get_response"
-    products = (
-        data.get(resp_key, {})
-            .get("resp_result", {})
-            .get("result", {})
-            .get("products", {})
-            .get("product", [])
-    ) or []
-
-    if not products:
-        return {}
-
-    p = products[0]
     return {
-        "image_urls": [p.get("product_main_image_url", "")],
-        "shipping_weight_lbs": None,  # not available in affiliate API
-        "description_html": "",
+        "image_urls": images,
+        "shipping_weight_lbs": round(weight_g / 453.6, 2) if weight_g else None,
+        "description_html": p.get("description", ""),
     }
 
 
-def _parse_orders(trade_desc: str) -> int:
-    """Parse '1.2k+ sold' → 1200."""
-    if not trade_desc:
-        return 0
-    s = str(trade_desc).lower().replace("sold", "").replace("+", "").strip()
+def _parse_product(p: dict, keyword: str) -> dict:
+    # sellPrice can be "3.27 -- 4.42" or "5.00" — take the low end
+    raw_price = str(p.get("sellPrice") or "0").split("--")[0].strip()
     try:
-        if "k" in s:
-            return int(float(s.replace("k", "")) * 1000)
-        return int(float(s))
+        price = float(raw_price)
     except ValueError:
-        return 0
+        price = 0.0
+
+    # productWeight is grams, may be range like "20-38" — take low end
+    raw_weight = str(p.get("productWeight") or "0").split("-")[0].strip()
+    try:
+        weight_lbs = round(float(raw_weight) / 453.6, 2) if float(raw_weight) > 0 else None
+    except ValueError:
+        weight_lbs = None
+
+    image = p.get("productImage", "")
+
+    return {
+        "id": str(p.get("pid") or p.get("productId") or ""),
+        "title": p.get("productNameEn") or p.get("productName") or "",
+        "supplier_price_usd": price,
+        "shipping_weight_lbs": weight_lbs,
+        "review_count": 0.0,
+        "orders_count": int(p.get("quantitySold") or 0),
+        "image_urls": [image] if image else [],
+        "product_url": f"https://cjdropshipping.com/product/-p-{p.get('pid')}.html",
+        "keyword": keyword,
+    }
