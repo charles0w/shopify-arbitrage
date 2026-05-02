@@ -20,3 +20,8 @@ token.json
 .token_cache.json
 .cj_token_cache.json
 .ae_token_cache.json
+fulfillment_state.json
+
+# TypeScript build artifacts
+tsconfig.tsbuildinfo
+next-env.d.ts

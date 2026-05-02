@@ -4,14 +4,15 @@ Daily product research run.
 What it does:
   1. Runs research across all configured niches
   2. Scores and filters products (MIN_SCORE threshold)
-  3. Saves results to queue/YYYY-MM-DD.json
-  4. Writes a human-readable queue/YYYY-MM-DD.md for Obsidian review
+  3. Generates Claude listing copy for each product
+  4. Saves results to queue/YYYY-MM-DD.json + .md
+  5. Syncs to Supabase so the dashboard can show/approve them
 
 Run: python -m pipeline.daily_research
 """
 import json
-import sys
 import os
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -19,10 +20,24 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config.settings import MAX_QUEUE_SIZE
 from research.product_scorer import research_all_niches
+from listing.listing_generator import generate_listing
 from auth.shopify_token import get_token
 
 QUEUE_DIR = Path(__file__).parent.parent / "queue"
 QUEUE_DIR.mkdir(exist_ok=True)
+
+
+def _supabase_client():
+    """Return a Supabase client if credentials are configured, else None."""
+    try:
+        from supabase import create_client
+        url = os.environ.get("SUPABASE_URL", "")
+        key = os.environ.get("SUPABASE_SERVICE_KEY", "")
+        if url and key:
+            return create_client(url, key)
+    except ImportError:
+        pass
+    return None
 
 
 def run():
@@ -35,23 +50,43 @@ def run():
     products = research_all_niches(top_n=3)
     top = products[:MAX_QUEUE_SIZE]
 
-    # Save JSON queue
+    # Generate Claude listings for each product
+    print(f"[daily_research] Generating listings for {len(top)} products...")
+    enriched = []
+    for i, p in enumerate(top):
+        print(f"  [{i+1}/{len(top)}] {p['title'][:60]}")
+        try:
+            listing = generate_listing(p)
+            p["listing_title"] = listing.get("title", "")
+            p["listing_body_html"] = listing.get("body_html", "")
+            p["listing_tags"] = listing.get("tags", [])
+            p["listing_meta_title"] = listing.get("meta_title", "")
+            p["listing_meta_description"] = listing.get("meta_description", "")
+        except Exception as e:
+            print(f"    Listing gen failed: {e}")
+            p["listing_title"] = None
+            p["listing_body_html"] = None
+            p["listing_tags"] = []
+            p["listing_meta_title"] = None
+            p["listing_meta_description"] = None
+        enriched.append(p)
+
+    # Save local JSON queue
     with open(json_path, "w") as f:
-        json.dump(top, f, indent=2)
+        json.dump(enriched, f, indent=2)
 
     # Write Obsidian-readable markdown queue
     lines = [
         f"# Green-Light Queue — {today}",
         "",
-        f"**{len(top)} products found above score threshold.**",
-        "Review each product below and run `python -m pipeline.approve {date} <indices>` to approve.",
+        f"**{len(enriched)} products found above score threshold.**",
+        "Approve via the Vercel dashboard or run `python -m pipeline.approve`.",
         "",
     ]
-
-    for i, p in enumerate(top):
+    for i, p in enumerate(enriched):
         breakdown = p.get("score_breakdown", {})
         lines += [
-            f"## [{i}] {p['title'][:80]}",
+            f"## [{i}] {p.get('listing_title') or p['title'][:80]}",
             "",
             f"- **Score:** {p['score']} "
             f"(margin {breakdown.get('margin_gap',0):.2f} · "
@@ -62,18 +97,46 @@ def run():
             f"- **Suggested sale price:** ${p.get('suggested_sale_price_usd', 0):.2f}  "
             f"({p.get('markup', 0):.1f}×)",
             f"- **Niche keyword:** {p.get('keyword', '')}",
-            f"- **AliExpress link:** {p.get('product_url', '')}",
+            f"- **CJ link:** {p.get('product_url', '')}",
             f"- **Orders:** {p.get('orders_count', 0):,}",
             "",
         ]
-
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-    print(f"[daily_research] Done. {len(top)} products queued.")
-    print(f"  JSON: {json_path}")
-    print(f"  Review: {md_path}")
-    return top
+    print(f"[daily_research] Saved locally: {json_path}")
+
+    # Sync to Supabase
+    sb = _supabase_client()
+    if sb:
+        rows = [
+            {
+                "date": today,
+                "cj_product_id": p.get("id", ""),
+                "title": p.get("title", ""),
+                "supplier_price_usd": p.get("supplier_price_usd", 0),
+                "suggested_sale_price_usd": p.get("suggested_sale_price_usd", 0),
+                "score": p.get("score", 0),
+                "keyword": p.get("keyword", ""),
+                "product_url": p.get("product_url", ""),
+                "image_url": (p.get("image_urls") or [""])[0],
+                "listing_title": p.get("listing_title"),
+                "listing_body_html": p.get("listing_body_html"),
+                "listing_tags": p.get("listing_tags", []),
+                "listing_meta_title": p.get("listing_meta_title"),
+                "listing_meta_description": p.get("listing_meta_description"),
+                "status": "pending",
+            }
+            for p in enriched
+        ]
+        result = sb.table("queue_items").insert(rows).execute()
+        print(f"[daily_research] Synced {len(rows)} items to Supabase.")
+    else:
+        print("[daily_research] No Supabase credentials — skipping cloud sync.")
+        print("  Add SUPABASE_URL and SUPABASE_SERVICE_KEY to .env to enable dashboard.")
+
+    print(f"[daily_research] Done. {len(enriched)} products queued.")
+    return enriched
 
 
 if __name__ == "__main__":
