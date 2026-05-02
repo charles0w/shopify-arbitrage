@@ -1,82 +1,139 @@
 """
-Fetch product listings from AliExpress via RapidAPI aliexpress-datahub.
-Requires RAPIDAPI_KEY in .env.
+Fetch product listings from AliExpress via the official Affiliate Open Platform API.
+Docs: https://developers.aliexpress.com/
+
+Requires in .env:
+  ALIEXPRESS_APP_KEY
+  ALIEXPRESS_APP_SECRET
 
 Each returned product dict has:
   id, title, supplier_price_usd, shipping_weight_lbs,
   review_count, orders_count, image_urls, product_url
 """
 import os
+import time
+import hmac
+import hashlib
+import json
 import requests
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
-_SEARCH_URL = "https://aliexpress-datahub.p.rapidapi.com/item_search_2"
-_DETAIL_URL = "https://aliexpress-datahub.p.rapidapi.com/item_detail_2"
-_HEADERS = {
-    "X-RapidAPI-Key": _RAPIDAPI_KEY,
-    "X-RapidAPI-Host": "aliexpress-datahub.p.rapidapi.com",
-}
+_APP_KEY = os.environ.get("ALIEXPRESS_APP_KEY", "")
+_APP_SECRET = os.environ.get("ALIEXPRESS_APP_SECRET", "")
+_BASE_URL = "https://api-sg.aliexpress.com/sync"
+
+
+def _sign(params: dict) -> str:
+    """Generate HMAC-SHA256 signature required by AliExpress Open API."""
+    sorted_params = sorted(params.items())
+    sign_string = _APP_SECRET + "".join(f"{k}{v}" for k, v in sorted_params) + _APP_SECRET
+    return hmac.new(
+        _APP_SECRET.encode("utf-8"),
+        sign_string.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest().upper()
+
+
+def _call(method: str, extra_params: dict) -> dict:
+    """Make a signed API call. Returns the parsed JSON response."""
+    params = {
+        "method": method,
+        "app_key": _APP_KEY,
+        "timestamp": str(int(time.time() * 1000)),
+        "sign_method": "sha256",
+        "format": "json",
+        "v": "2.0",
+        **extra_params,
+    }
+    params["sign"] = _sign(params)
+    resp = requests.get(_BASE_URL, params=params, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
 
 
 def search_products(keyword: str, max_results: int = 20) -> list[dict]:
-    """Search AliExpress for keyword. Returns up to max_results products."""
-    if not _RAPIDAPI_KEY:
-        raise EnvironmentError("RAPIDAPI_KEY not set in .env")
+    """Search AliExpress affiliate products by keyword."""
+    if not _APP_KEY or not _APP_SECRET:
+        raise EnvironmentError(
+            "ALIEXPRESS_APP_KEY and ALIEXPRESS_APP_SECRET not set in .env. "
+            "Sign up at portals.aliexpress.com and apply for API access."
+        )
 
-    params = {"keywords": keyword, "page": "1", "sort": "SALE_PRICE_ASC"}
-    resp = requests.get(_SEARCH_URL, headers=_HEADERS, params=params, timeout=15)
-    resp.raise_for_status()
-    data = resp.json()
+    data = _call("aliexpress.affiliate.product.query", {
+        "keywords": keyword,
+        "page_no": 1,
+        "page_size": min(max_results, 50),
+        "sort": "SALE_PRICE_ASC",
+        "target_currency": "USD",
+        "target_language": "EN",
+        "tracking_id": "default",
+        "fields": "product_id,product_title,sale_price,original_price,"
+                  "evaluate_rate,lastest_volume,product_main_image_url,"
+                  "product_detail_url,second_level_category_name",
+    })
 
-    items = data.get("result", {}).get("resultList", []) or []
+    resp_key = "aliexpress_affiliate_product_query_response"
+    products_data = (
+        data.get(resp_key, {})
+            .get("resp_result", {})
+            .get("result", {})
+            .get("products", {})
+            .get("product", [])
+    ) or []
+
     products = []
-    for item in items[:max_results]:
-        info = item.get("item", {})
-        prices = info.get("sku", {}).get("def", {})
-        price_str = prices.get("promotionPrice") or prices.get("price") or "0"
+    for p in products_data[:max_results]:
         try:
-            price = float(str(price_str).replace("US $", "").replace(",", "").strip())
+            price = float(str(p.get("sale_price", "0")).replace("$", "").strip())
         except ValueError:
             price = 0.0
 
         products.append({
-            "id": str(info.get("itemId", "")),
-            "title": info.get("title", ""),
+            "id": str(p.get("product_id", "")),
+            "title": p.get("product_title", ""),
             "supplier_price_usd": price,
-            "shipping_weight_lbs": None,  # enriched in get_product_detail
-            "review_count": int(info.get("averageStarRate", 0) or 0),
-            "orders_count": _parse_orders(info.get("tradeDesc", "")),
-            "image_urls": [info.get("image", "")],
-            "product_url": f"https://www.aliexpress.com/item/{info.get('itemId')}.html",
+            "shipping_weight_lbs": None,
+            "review_count": float(str(p.get("evaluate_rate", "0")).replace("%", "") or 0),
+            "orders_count": int(p.get("lastest_volume", 0) or 0),
+            "image_urls": [p.get("product_main_image_url", "")],
+            "product_url": p.get("product_detail_url", ""),
         })
 
     return products
 
 
 def get_product_detail(product_id: str) -> dict:
-    """Fetch full detail for a single product — adds shipping weight and more images."""
-    params = {"itemId": product_id, "currency": "USD", "locale": "en_US"}
-    resp = requests.get(_DETAIL_URL, headers=_HEADERS, params=params, timeout=15)
-    resp.raise_for_status()
-    data = resp.json().get("result", {})
+    """Fetch additional detail for a single product."""
+    if not _APP_KEY or not _APP_SECRET:
+        return {}
 
-    images = data.get("imagePathList", [])
-    weight_g = None
-    props = data.get("productPropComponent", {}).get("propList", [])
-    for prop in props:
-        if "weight" in prop.get("attrName", "").lower():
-            try:
-                weight_g = float(prop.get("attrValue", "").replace("g", "").strip())
-            except ValueError:
-                pass
+    data = _call("aliexpress.affiliate.productdetail.get", {
+        "product_ids": product_id,
+        "target_currency": "USD",
+        "target_language": "EN",
+        "tracking_id": "default",
+        "fields": "product_id,product_main_image_url,product_video,detail",
+    })
 
+    resp_key = "aliexpress_affiliate_productdetail_get_response"
+    products = (
+        data.get(resp_key, {})
+            .get("resp_result", {})
+            .get("result", {})
+            .get("products", {})
+            .get("product", [])
+    ) or []
+
+    if not products:
+        return {}
+
+    p = products[0]
     return {
-        "image_urls": images,
-        "shipping_weight_lbs": round(weight_g / 453.6, 2) if weight_g else None,
-        "description_html": data.get("description", ""),
+        "image_urls": [p.get("product_main_image_url", "")],
+        "shipping_weight_lbs": None,  # not available in affiliate API
+        "description_html": "",
     }
 
 
@@ -84,10 +141,10 @@ def _parse_orders(trade_desc: str) -> int:
     """Parse '1.2k+ sold' → 1200."""
     if not trade_desc:
         return 0
-    s = trade_desc.lower().replace("sold", "").replace("+", "").strip()
+    s = str(trade_desc).lower().replace("sold", "").replace("+", "").strip()
     try:
         if "k" in s:
             return int(float(s.replace("k", "")) * 1000)
-        return int(s)
+        return int(float(s))
     except ValueError:
         return 0

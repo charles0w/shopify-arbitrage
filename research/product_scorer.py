@@ -104,10 +104,14 @@ def research_niche(keyword: str, max_products: int = 20) -> list[dict]:
 
 def research_all_niches(top_n: int = 3) -> list[dict]:
     """Run research across all configured niches. Return top_n per niche."""
+    import time
     results = []
-    for niche in NICHES:
-        niche_results = research_niche(niche, max_products=20)
+    for i, niche in enumerate(NICHES):
+        print(f"  [{i+1}/{len(NICHES)}] researching: {niche}")
+        niche_results = research_niche(niche, max_products=10)
         results.extend(niche_results[:top_n])
+        if i < len(NICHES) - 1:
+            time.sleep(30)  # stay within RapidAPI free tier rate limit
     # Deduplicate by product ID
     seen = set()
     deduped = []
