@@ -6,6 +6,7 @@ load_dotenv()
 SHOPIFY_STORE_URL = os.environ["SHOPIFY_STORE_URL"]
 SHOPIFY_ACCESS_TOKEN = os.environ["SHOPIFY_ACCESS_TOKEN"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
+RAPIDAPI_KEY = os.environ["RAPIDAPI_KEY"]
 
 # Scoring thresholds
 MIN_SCORE = 0.65
