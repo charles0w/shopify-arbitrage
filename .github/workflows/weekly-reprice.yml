@@ -1,0 +1,33 @@
+name: Weekly reprice
+
+# Re-applies the markup formula across all active Shopify products,
+# updating prices that have drifted by > 5% from supplier cost.
+#
+# Required GitHub secrets:
+#   SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN
+#   ANTHROPIC_API_KEY    (settings.py imports require it even though
+#                         this script doesn't call Claude)
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"  # 10:00 UTC every Monday
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - run: python -m pipeline.weekly_reprice
+        env:
+          SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

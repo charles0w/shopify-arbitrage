@@ -1,0 +1,47 @@
+name: Fulfillment tick
+
+# Runs one tick of the auto-fulfillment loop: places CJ orders for new paid
+# Shopify orders and pushes back tracking numbers when CJ ships.
+#
+# State is pulled from Supabase on each tick (the local fulfillment_state.json
+# file isn't persisted between CI runs), so the fulfillments table acts as
+# the source of truth — Supabase is REQUIRED for this workflow to be safe.
+#
+# Required GitHub secrets:
+#   SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN
+#   ANTHROPIC_API_KEY      (transitively required by settings.py)
+#   CJ_API_KEY
+#   SUPABASE_URL, SUPABASE_SERVICE_KEY
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"  # every 15 min
+  workflow_dispatch:
+
+# Only one fulfillment tick at a time — prevents two overlapping runs
+# from racing to place duplicate CJ orders.
+concurrency:
+  group: fulfillment
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - run: python -m fulfillment.loop --once
+        env:
+          SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
