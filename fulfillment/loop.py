@@ -98,7 +98,13 @@ def fulfill_new_orders():
 
             vid = variants[0].get("vid") or variants[0].get("variantId", "")
             country = (order.get("shipping_address") or {}).get("country_code", "US")
-            shipping = get_cheapest_shipping(vid, country)
+            try:
+                shipping = get_cheapest_shipping(vid, country)
+            except Exception as exc:
+                reason = f"'{title}' — shipping calc failed: {exc}"
+                print(f"    {reason}")
+                skip_reasons.append(reason)
+                continue
 
             cj_items.append({
                 "vid": vid,
