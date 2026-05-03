@@ -69,10 +69,14 @@ def fulfill_new_orders():
         print(f"\n  Order {name}  (id={order['id']})")
 
         cj_items = []
+        skip_reasons = []
         for item in order.get("line_items", []):
+            title = item.get("title", "?")
             pid_shopify = item.get("product_id")
             if not pid_shopify:
-                print(f"    Skipping line item '{item.get('title')}' — no product_id")
+                reason = f"'{title}' has no product_id"
+                print(f"    Skipping line item — {reason}")
+                skip_reasons.append(reason)
                 continue
 
             meta = get_product_metafields(pid_shopify)
@@ -80,12 +84,16 @@ def fulfill_new_orders():
             cj_pid = _cj_pid_from_url(supplier_url)
 
             if not cj_pid:
-                print(f"    '{item.get('title')}' — no CJ pid in metafields, skipping")
+                reason = f"'{title}' missing arbitrage.supplier_url metafield"
+                print(f"    {reason}, skipping")
+                skip_reasons.append(reason)
                 continue
 
             variants = get_cj_variants(cj_pid)
             if not variants:
-                print(f"    '{item.get('title')}' — CJ variants not found for pid {cj_pid}")
+                reason = f"'{title}' — no CJ variants for pid {cj_pid}"
+                print(f"    {reason}")
+                skip_reasons.append(reason)
                 continue
 
             vid = variants[0].get("vid") or variants[0].get("variantId", "")
@@ -97,10 +105,13 @@ def fulfill_new_orders():
                 "quantity": item.get("quantity", 1),
                 "shipping_name": shipping,
             })
-            print(f"    + '{item.get('title')}' → CJ vid={vid}, ship={shipping}")
+            print(f"    + '{title}' → CJ vid={vid}, ship={shipping}")
 
         if not cj_items:
-            print(f"  No fulfillable items in {name} — skipping")
+            reason = "no eligible line items: " + "; ".join(skip_reasons) if skip_reasons else "no line items on order"
+            print(f"  {name} — {reason}")
+            mark_error(order["id"], reason, order=order)
+            _alert(f":warning: {name}: {reason}")
             continue
 
         try:
