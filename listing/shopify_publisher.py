@@ -102,6 +102,25 @@ def update_price(product_id: int, variant_id: int, new_price: float):
     resp.raise_for_status()
 
 
+def get_product_metafields(product_id: int) -> dict:
+    """Return {"namespace.key": value} for all metafields on a Shopify product.
+
+    list_active_products / GET /products.json doesn't return metafields, so
+    weekly_reprice has to fetch them per product to find the stored
+    arbitrage.supplier_price.
+    """
+    resp = requests.get(
+        f"{_BASE}/products/{product_id}/metafields.json",
+        headers=_HEADERS,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return {
+        f"{mf['namespace']}.{mf['key']}": mf["value"]
+        for mf in resp.json().get("metafields", [])
+    }
+
+
 def _next_page_url(link_header: str) -> str | None:
     for part in link_header.split(","):
         if 'rel="next"' in part:

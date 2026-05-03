@@ -12,6 +12,11 @@ from pathlib import Path
 import requests
 from config.settings import SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN
 
+# Re-export for back-compat with fulfillment.loop which historically imported
+# get_product_metafields from here. Canonical definition lives in
+# listing.shopify_publisher so weekly_reprice can use it without duplication.
+from listing.shopify_publisher import get_product_metafields  # noqa: F401
+
 _BASE = f"https://{SHOPIFY_STORE_URL}/admin/api/2024-01"
 _HEADERS = {
     "X-Shopify-Access-Token": SHOPIFY_ACCESS_TOKEN,
@@ -136,20 +141,6 @@ def get_new_orders() -> list[dict]:
     )
     resp.raise_for_status()
     return [o for o in resp.json().get("orders", []) if str(o["id"]) not in done]
-
-
-def get_product_metafields(product_id: int) -> dict:
-    """Return {namespace.key: value} for all metafields on a Shopify product."""
-    resp = requests.get(
-        f"{_BASE}/products/{product_id}/metafields.json",
-        headers=_HEADERS,
-        timeout=15,
-    )
-    resp.raise_for_status()
-    return {
-        f"{mf['namespace']}.{mf['key']}": mf["value"]
-        for mf in resp.json().get("metafields", [])
-    }
 
 
 def mark_cj_pending(shopify_order_id: int, order: dict | None = None):
