@@ -13,6 +13,8 @@ Run: python -m pipeline.daily_research
 import json
 import os
 import sys
+import time
+import traceback
 from datetime import date
 from pathlib import Path
 
@@ -28,13 +30,24 @@ from auth.shopify_token import get_token
 QUEUE_DIR = Path(__file__).parent.parent / "queue"
 QUEUE_DIR.mkdir(exist_ok=True)
 
+_INSERT_RETRY_BACKOFF_S = (0.5, 1.5, 4.0)
 
-def _post_digest(today: str, items: list[dict]):
-    """Post a research summary to DIGEST_WEBHOOK_URL if configured.
-    Slack/Discord-compatible payload — both accept {"text": "..."} on incoming webhooks."""
+
+def _post_webhook(text: str):
+    """POST to DIGEST_WEBHOOK_URL if configured. Slack/Discord-compatible.
+    Failures here are logged and swallowed — the alert path must never crash
+    the run."""
     url = os.environ.get("DIGEST_WEBHOOK_URL", "").strip()
     if not url:
         return
+    try:
+        requests.post(url, json={"text": text}, timeout=10)
+    except Exception as e:
+        print(f"[daily_research] Webhook post failed: {e}")
+
+
+def _post_digest(today: str, items: list[dict]):
+    """Successful run summary."""
     dashboard = os.environ.get("DASHBOARD_URL", "").rstrip("/")
     queue_link = f"{dashboard}/queue?date={today}" if dashboard else ""
 
@@ -47,11 +60,52 @@ def _post_digest(today: str, items: list[dict]):
         )
     if queue_link:
         lines.append(f"Approve: {queue_link}")
+    _post_webhook("\n".join(lines))
 
-    try:
-        requests.post(url, json={"text": "\n".join(lines)}, timeout=10)
-    except Exception as e:
-        print(f"[daily_research] Digest webhook failed: {e}")
+
+def _post_zero_result_alert(today: str):
+    """Distinct alert when scoring drops everything below threshold — easy to
+    miss in a normal-looking 'X products queued' digest, but it usually means
+    something is broken (pytrends rate-limited, niches gone stale, supplier
+    prices outside markup tiers)."""
+    _post_webhook(
+        f":warning: Arbitrage research — {today}: 0 products queued. "
+        f"Likely causes: pytrends rate-limited, niche keywords no longer "
+        f"score above MIN_SCORE, or CJ search returning empty. "
+        f"Check the GH Actions log."
+    )
+
+
+def _post_failure_alert(today: str, exc: BaseException):
+    """Loud alert when daily_research itself crashes. Without this a red CI
+    job is the only signal and it's easy to miss for a day."""
+    tb = traceback.format_exc()
+    summary = str(exc).splitlines()[0][:200] if str(exc) else type(exc).__name__
+    _post_webhook(
+        f":rotating_light: Arbitrage research FAILED — {today}\n"
+        f"{type(exc).__name__}: {summary}\n"
+        f"```\n{tb[-1500:]}\n```"
+    )
+
+
+def _insert_with_retry(sb, rows: list[dict]):
+    """Retry the queue_items insert on transient Supabase failure. Same
+    backoff pattern as fulfillment._supabase_retry. Logs each attempt."""
+    last_exc: Exception | None = None
+    for attempt in range(len(_INSERT_RETRY_BACKOFF_S) + 1):
+        try:
+            return sb.table("queue_items").insert(rows).execute()
+        except Exception as exc:
+            last_exc = exc
+            if attempt < len(_INSERT_RETRY_BACKOFF_S):
+                print(f"[daily_research] Supabase insert attempt "
+                      f"{attempt + 1} failed: {exc} — retrying")
+                time.sleep(_INSERT_RETRY_BACKOFF_S[attempt])
+            else:
+                print(f"[daily_research] Supabase insert gave up after "
+                      f"{attempt + 1} attempts: {exc}")
+    assert last_exc is not None
+    raise last_exc
 
 
 def _supabase_client():
@@ -69,6 +123,14 @@ def _supabase_client():
 
 def run():
     today = date.today().isoformat()
+    try:
+        return _run(today)
+    except Exception as exc:
+        _post_failure_alert(today, exc)
+        raise  # re-raise so the GH Actions job is marked failed too
+
+
+def _run(today: str):
     json_path = QUEUE_DIR / f"{today}.json"
     md_path = QUEUE_DIR / f"{today}.md"
 
@@ -157,13 +219,16 @@ def run():
             }
             for p in enriched
         ]
-        result = sb.table("queue_items").insert(rows).execute()
+        _insert_with_retry(sb, rows)
         print(f"[daily_research] Synced {len(rows)} items to Supabase.")
     else:
         print("[daily_research] No Supabase credentials — skipping cloud sync.")
         print("  Add SUPABASE_URL and SUPABASE_SERVICE_KEY to .env to enable dashboard.")
 
-    _post_digest(today, enriched)
+    if enriched:
+        _post_digest(today, enriched)
+    else:
+        _post_zero_result_alert(today)
 
     print(f"[daily_research] Done. {len(enriched)} products queued.")
     return enriched
