@@ -7,31 +7,47 @@ const headers = () => ({
   "Content-Type": "application/json",
 });
 
-export async function getOrders(limit = 50) {
-  const resp = await fetch(
-    `${BASE}/orders.json?limit=${limit}&status=any&order=created_at+desc`,
-    { headers: headers(), next: { revalidate: 60 } }
-  );
-  if (!resp.ok) throw new Error(`Shopify orders ${resp.status}`);
-  return (await resp.json()).orders as ShopifyOrder[];
+export async function getOrders(limit = 50): Promise<ShopifyOrder[]> {
+  try {
+    const resp = await fetch(
+      `${BASE}/orders.json?limit=${limit}&status=any&order=created_at+desc`,
+      { headers: headers(), next: { revalidate: 60 } }
+    );
+    if (!resp.ok) {
+      console.warn(`[shopify] getOrders ${resp.status}`);
+      return [];
+    }
+    return (await resp.json()).orders as ShopifyOrder[];
+  } catch (e) {
+    console.warn(`[shopify] getOrders failed:`, e);
+    return [];
+  }
 }
 
-export async function getProductCount() {
-  const resp = await fetch(`${BASE}/products/count.json?status=active`, {
-    headers: headers(),
-    next: { revalidate: 300 },
-  });
-  if (!resp.ok) return 0;
-  return (await resp.json()).count as number;
+export async function getProductCount(): Promise<number> {
+  try {
+    const resp = await fetch(`${BASE}/products/count.json?status=active`, {
+      headers: headers(),
+      next: { revalidate: 300 },
+    });
+    if (!resp.ok) return 0;
+    return (await resp.json()).count as number;
+  } catch {
+    return 0;
+  }
 }
 
-export async function getOrderCount() {
-  const resp = await fetch(
-    `${BASE}/orders/count.json?financial_status=paid`,
-    { headers: headers(), next: { revalidate: 60 } }
-  );
-  if (!resp.ok) return 0;
-  return (await resp.json()).count as number;
+export async function getOrderCount(): Promise<number> {
+  try {
+    const resp = await fetch(
+      `${BASE}/orders/count.json?financial_status=paid`,
+      { headers: headers(), next: { revalidate: 60 } }
+    );
+    if (!resp.ok) return 0;
+    return (await resp.json()).count as number;
+  } catch {
+    return 0;
+  }
 }
 
 export async function createDraft(item: QueueItem) {
