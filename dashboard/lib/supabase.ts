@@ -27,6 +27,7 @@ export type QueueItem = {
   keyword: string;
   product_url: string;
   image_url: string;
+  image_urls: string[] | null;
   listing_title: string | null;
   listing_body_html: string | null;
   listing_tags: string[] | null;

@@ -65,7 +65,14 @@ export async function createDraft(item: QueueItem) {
           inventory_management: null,
         },
       ],
-      images: item.image_url ? [{ src: item.image_url }] : [],
+      // Prefer the multi-image array (newer queue items); fall back to the
+      // single image_url for older rows that predate the column.
+      images: (item.image_urls && item.image_urls.length > 0
+        ? item.image_urls
+        : item.image_url
+        ? [item.image_url]
+        : []
+      ).map((src) => ({ src })),
       metafields: [
         {
           namespace: "arbitrage",
