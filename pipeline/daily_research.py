@@ -16,6 +16,8 @@ import sys
 from datetime import date
 from pathlib import Path
 
+import requests
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config.settings import MAX_QUEUE_SIZE
@@ -25,6 +27,31 @@ from auth.shopify_token import get_token
 
 QUEUE_DIR = Path(__file__).parent.parent / "queue"
 QUEUE_DIR.mkdir(exist_ok=True)
+
+
+def _post_digest(today: str, items: list[dict]):
+    """Post a research summary to DIGEST_WEBHOOK_URL if configured.
+    Slack/Discord-compatible payload — both accept {"text": "..."} on incoming webhooks."""
+    url = os.environ.get("DIGEST_WEBHOOK_URL", "").strip()
+    if not url:
+        return
+    dashboard = os.environ.get("DASHBOARD_URL", "").rstrip("/")
+    queue_link = f"{dashboard}/queue?date={today}" if dashboard else ""
+
+    lines = [f"*Arbitrage research — {today}*", f"{len(items)} products queued."]
+    for i, p in enumerate(items[:3]):
+        title = (p.get("listing_title") or p.get("title") or "")[:80]
+        lines.append(
+            f"  {i+1}. {title} — score {p.get('score', 0):.2f} "
+            f"(${p.get('supplier_price_usd', 0):.2f} → ${p.get('suggested_sale_price_usd', 0):.2f})"
+        )
+    if queue_link:
+        lines.append(f"Approve: {queue_link}")
+
+    try:
+        requests.post(url, json={"text": "\n".join(lines)}, timeout=10)
+    except Exception as e:
+        print(f"[daily_research] Digest webhook failed: {e}")
 
 
 def _supabase_client():
@@ -134,6 +161,8 @@ def run():
     else:
         print("[daily_research] No Supabase credentials — skipping cloud sync.")
         print("  Add SUPABASE_URL and SUPABASE_SERVICE_KEY to .env to enable dashboard.")
+
+    _post_digest(today, enriched)
 
     print(f"[daily_research] Done. {len(enriched)} products queued.")
     return enriched
