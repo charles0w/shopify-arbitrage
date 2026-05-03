@@ -263,6 +263,28 @@ function SelectionBar({
     }
   }
 
+  async function rejectSelected() {
+    setBusy(true);
+    setErr(null);
+    setProgress(`Rejecting ${selectedIds.length}…`);
+    try {
+      const resp = await fetch("/api/queue/bulk/reject", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds }),
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+      onClear();
+      router.refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
   return (
     <div className="mb-5 flex flex-wrap items-center gap-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-4 py-2.5">
       <p className="text-sm text-indigo-300 font-medium">
@@ -284,6 +306,14 @@ function SelectionBar({
         className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 disabled:opacity-50"
       >
         Cancel
+      </button>
+      <button
+        type="button"
+        onClick={rejectSelected}
+        disabled={busy}
+        className="px-3 py-1.5 rounded-md text-sm font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors disabled:opacity-50"
+      >
+        {busy ? "…" : `Reject ${selectedIds.length}`}
       </button>
       <button
         type="button"
