@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { QueueItem } from "@/lib/supabase";
 import Image from "next/image";
 import DOMPurify from "isomorphic-dompurify";
@@ -35,7 +36,15 @@ function StatusBadge({ status }: { status: Status }) {
   );
 }
 
-function Card({ item: init }: { item: QueueItem }) {
+function Card({
+  item: init,
+  selected,
+  onToggleSelect,
+}: {
+  item: QueueItem;
+  selected: boolean;
+  onToggleSelect: (id: string) => void;
+}) {
   const [item, setItem] = useState(init);
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -84,6 +93,17 @@ function Card({ item: init }: { item: QueueItem }) {
           <div className="absolute inset-0 flex items-center justify-center text-zinc-600 text-2xl">
             ◻
           </div>
+        )}
+        {isPending && (
+          <label className="absolute top-2 left-2 inline-flex items-center justify-center w-6 h-6 rounded bg-zinc-900/80 backdrop-blur cursor-pointer hover:bg-zinc-800/90">
+            <input
+              type="checkbox"
+              checked={selected}
+              onChange={() => onToggleSelect(item.id)}
+              className="w-4 h-4 accent-indigo-500 cursor-pointer"
+              aria-label={`Select ${displayTitle}`}
+            />
+          </label>
         )}
       </div>
 
@@ -174,7 +194,117 @@ function Card({ item: init }: { item: QueueItem }) {
   );
 }
 
+function SelectionBar({
+  selectedIds,
+  pendingIds,
+  onSelectAll,
+  onClear,
+}: {
+  selectedIds: string[];
+  pendingIds: string[];
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  if (selectedIds.length === 0) {
+    return (
+      <div className="flex items-center gap-3 mb-5">
+        <p className="text-sm text-zinc-500">
+          {pendingIds.length} pending in queue
+        </p>
+        {pendingIds.length > 0 && (
+          <button
+            type="button"
+            onClick={onSelectAll}
+            className="text-xs text-indigo-400 hover:text-indigo-300"
+          >
+            Select all pending
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  async function approveSelected() {
+    setBusy(true);
+    setErr(null);
+    setProgress(`Approving ${selectedIds.length}…`);
+    try {
+      const resp = await fetch("/api/queue/bulk/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: selectedIds }),
+      });
+      const json = await resp.json();
+      if (!resp.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+      const failed = json.failed ?? 0;
+      const approved = json.approved ?? 0;
+      if (failed > 0) {
+        const firstErr = (json.results || []).find(
+          (r: { ok: boolean }) => !r.ok
+        );
+        setErr(
+          `${approved} approved, ${failed} failed${
+            firstErr?.error ? `: ${firstErr.error}` : ""
+          }`
+        );
+      }
+      onClear();
+      router.refresh();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+      setProgress(null);
+    }
+  }
+
+  return (
+    <div className="mb-5 flex flex-wrap items-center gap-3 bg-indigo-500/10 border border-indigo-500/30 rounded-lg px-4 py-2.5">
+      <p className="text-sm text-indigo-300 font-medium">
+        {selectedIds.length} selected
+      </p>
+      <div className="flex-1" />
+      {progress && (
+        <p className="text-xs text-zinc-400">{progress}</p>
+      )}
+      {err && (
+        <p className="text-xs text-rose-400 max-w-md truncate" title={err}>
+          {err}
+        </p>
+      )}
+      <button
+        type="button"
+        onClick={onClear}
+        disabled={busy}
+        className="text-xs text-zinc-400 hover:text-zinc-200 px-2 py-1 disabled:opacity-50"
+      >
+        Cancel
+      </button>
+      <button
+        type="button"
+        onClick={approveSelected}
+        disabled={busy}
+        className="px-3 py-1.5 rounded-md text-sm font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors disabled:opacity-50"
+      >
+        {busy ? "…" : `Approve ${selectedIds.length}`}
+      </button>
+    </div>
+  );
+}
+
 export default function QueueGrid({ items }: { items: QueueItem[] }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const pendingIds = useMemo(
+    () => items.filter((i) => i.status === "pending").map((i) => i.id),
+    [items]
+  );
+
   if (items.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-24 text-zinc-600">
@@ -185,16 +315,38 @@ export default function QueueGrid({ items }: { items: QueueItem[] }) {
     );
   }
 
-  const pending = items.filter((i) => i.status === "pending").length;
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const approved = items.filter((i) => i.status === "approved").length;
+  const rejected = items.filter((i) => i.status === "rejected").length;
+  const selectedIds = Array.from(selected).filter((id) => pendingIds.includes(id));
 
   return (
     <div>
-      <p className="text-sm text-zinc-500 mb-5">
-        {pending} pending · {items.filter((i) => i.status === "approved").length} approved · {items.filter((i) => i.status === "rejected").length} rejected
+      <SelectionBar
+        selectedIds={selectedIds}
+        pendingIds={pendingIds}
+        onSelectAll={() => setSelected(new Set(pendingIds))}
+        onClear={() => setSelected(new Set())}
+      />
+      <p className="text-xs text-zinc-600 mb-4 -mt-2">
+        {pendingIds.length} pending · {approved} approved · {rejected} rejected
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {items.map((item) => (
-          <Card key={item.id} item={item} />
+          <Card
+            key={item.id}
+            item={item}
+            selected={selected.has(item.id)}
+            onToggleSelect={toggle}
+          />
         ))}
       </div>
     </div>
