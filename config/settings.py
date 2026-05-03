@@ -6,9 +6,6 @@ load_dotenv()
 SHOPIFY_STORE_URL = os.environ["SHOPIFY_STORE_URL"]
 SHOPIFY_ACCESS_TOKEN = os.environ["SHOPIFY_ACCESS_TOKEN"]
 ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-RAPIDAPI_KEY = os.environ.get("RAPIDAPI_KEY", "")
-ALIEXPRESS_APP_KEY = os.environ.get("ALIEXPRESS_APP_KEY", "")
-ALIEXPRESS_APP_SECRET = os.environ.get("ALIEXPRESS_APP_SECRET", "")
 
 # Scoring thresholds
 MIN_SCORE = 0.40
