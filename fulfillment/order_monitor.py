@@ -138,6 +138,30 @@ def mark_fulfilled(shopify_order_id: int, cj_order_id: str, order: dict | None =
         sb.table("fulfillments").upsert(row, on_conflict="shopify_order_id").execute()
 
 
+def mark_error(shopify_order_id: int, error_message: str, order: dict | None = None):
+    """Record a failed CJ order placement so it surfaces in the dashboard.
+
+    Adds the Shopify order ID to fulfilled_order_ids so the next poll doesn't
+    immediately retry — the operator should resolve the error and clear/retry
+    manually. Upserts a fulfillments row with status='error'.
+    """
+    state = _load_state()
+    if str(shopify_order_id) not in state["fulfilled_order_ids"]:
+        state["fulfilled_order_ids"].append(str(shopify_order_id))
+    _save_state(state)
+
+    sb = _sb()
+    if sb:
+        row = {
+            "shopify_order_id": str(shopify_order_id),
+            "shopify_order_name": order.get("name", "") if order else "",
+            "shopify_order_total": float(order.get("total_price", 0)) if order else 0,
+            "status": "error",
+            "error_message": error_message[:500],  # bound for the column
+        }
+        sb.table("fulfillments").upsert(row, on_conflict="shopify_order_id").execute()
+
+
 def get_pending_tracking() -> list[dict]:
     return _load_state()["pending_tracking"]
 

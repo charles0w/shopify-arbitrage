@@ -28,10 +28,18 @@ function FulfillmentStatus({ order }: { order: MergedOrder }) {
     return <span className="text-zinc-600 text-xs">—</span>;
   }
   const s = STATUS_MAP[order.fulfillment.status] || STATUS_MAP.pending;
+  const isError = order.fulfillment.status === "error";
+  const errMsg = order.fulfillment.error_message || "";
   return (
-    <span className={`flex items-center gap-1.5 text-xs ${s.text}`}>
+    <span
+      className={`flex items-center gap-1.5 text-xs ${s.text}`}
+      title={isError && errMsg ? errMsg : undefined}
+    >
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {s.label}
+      {isError && errMsg && (
+        <span className="text-zinc-500 truncate max-w-[160px]">— {errMsg}</span>
+      )}
     </span>
   );
 }
