@@ -70,16 +70,19 @@ function FulfillmentStatus({ order }: { order: MergedOrder }) {
     return <span className="text-zinc-600 text-xs">—</span>;
   }
   const s = STATUS_MAP[order.fulfillment.status] || STATUS_MAP.pending;
-  const isError = order.fulfillment.status === "error";
+  // Surface error_message on any non-shipped status. PR #5 covered status='error'
+  // (CJ placement failed); 'cj_placed' with error_message means CJ is shipped
+  // but tracking push to Shopify is failing — different bug, equally hidden.
   const errMsg = order.fulfillment.error_message || "";
+  const showErr = errMsg && order.fulfillment.status !== "shipped";
   return (
     <span
       className={`flex items-center gap-1.5 text-xs ${s.text}`}
-      title={isError && errMsg ? errMsg : undefined}
+      title={showErr ? errMsg : undefined}
     >
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {s.label}
-      {isError && errMsg && (
+      {showErr && (
         <span className="text-zinc-500 truncate max-w-[160px]">— {errMsg}</span>
       )}
     </span>
