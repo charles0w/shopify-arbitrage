@@ -12,13 +12,17 @@ Each tick:
 
 Use --once for cron-style scheduling (e.g. GitHub Actions every 15 min).
 """
+import os
 import sys
 import time
+
+import requests
 
 from fulfillment.order_monitor import (
     get_new_orders,
     get_product_metafields,
     mark_fulfilled,
+    mark_error,
     get_pending_tracking,
     drop_tracking_entry,
     push_tracking_to_shopify,
@@ -31,6 +35,19 @@ from fulfillment.cj_fulfiller import (
 )
 
 POLL_INTERVAL = 900  # 15 minutes
+
+
+def _alert(message: str):
+    """Post an error alert to DIGEST_WEBHOOK_URL if configured.
+    Same {"text": "..."} payload shape as the daily research digest —
+    Slack/Discord-compatible."""
+    url = os.environ.get("DIGEST_WEBHOOK_URL", "").strip()
+    if not url:
+        return
+    try:
+        requests.post(url, json={"text": message}, timeout=10)
+    except Exception as exc:
+        print(f"  Alert webhook failed: {exc}")
 
 
 def _cj_pid_from_url(supplier_url: str) -> str | None:
@@ -88,10 +105,12 @@ def fulfill_new_orders():
 
         try:
             cj_order_id = place_cj_order(order, cj_items)
-            mark_fulfilled(order["id"], cj_order_id)
+            mark_fulfilled(order["id"], cj_order_id, order=order)
             print(f"  CJ order created: {cj_order_id}")
         except Exception as exc:
             print(f"  FAILED to place CJ order for {name}: {exc}")
+            mark_error(order["id"], str(exc), order=order)
+            _alert(f":warning: CJ order failed for Shopify {name}: {exc}")
 
 
 def check_tracking():
