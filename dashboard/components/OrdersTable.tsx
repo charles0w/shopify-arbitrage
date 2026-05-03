@@ -1,9 +1,51 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import type { ShopifyOrder } from "@/lib/shopify";
 import type { Fulfillment } from "@/lib/supabase";
 
 type MergedOrder = ShopifyOrder & { fulfillment: Fulfillment | null };
+
+function RetryButton({ orderId }: { orderId: string }) {
+  const router = useRouter();
+  const [state, setState] = useState<"idle" | "loading" | "error">("idle");
+  const [err, setErr] = useState<string | null>(null);
+
+  async function retry() {
+    setState("loading");
+    setErr(null);
+    try {
+      const resp = await fetch(`/api/orders/${orderId}/retry`, { method: "POST" });
+      if (!resp.ok) {
+        const j = await resp.json().catch(() => ({}));
+        throw new Error(j.error || `HTTP ${resp.status}`);
+      }
+      router.refresh();
+    } catch (e) {
+      setState("error");
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  if (state === "error") {
+    return (
+      <span className="text-xs text-rose-400" title={err || ""}>
+        retry failed
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={retry}
+      disabled={state === "loading"}
+      className="text-xs text-indigo-400 hover:text-indigo-300 disabled:opacity-50"
+    >
+      {state === "loading" ? "…" : "Retry"}
+    </button>
+  );
+}
 
 const STATUS_MAP: Record<
   string,
@@ -59,7 +101,7 @@ export default function OrdersTable({ orders }: { orders: MergedOrder[] }) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b border-zinc-800 bg-zinc-900/50">
-            {["Order", "Date", "Customer", "Items", "Total", "CJ Order", "Status", "Tracking"].map(
+            {["Order", "Date", "Customer", "Items", "Total", "CJ Order", "Status", "Tracking", ""].map(
               (h) => (
                 <th
                   key={h}
@@ -114,6 +156,11 @@ export default function OrdersTable({ orders }: { orders: MergedOrder[] }) {
                     <span title={o.fulfillment?.carrier || ""}>{tracking}</span>
                   ) : (
                     <span className="text-zinc-600">—</span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  {o.fulfillment?.status === "error" && (
+                    <RetryButton orderId={String(o.id)} />
                   )}
                 </td>
               </tr>
