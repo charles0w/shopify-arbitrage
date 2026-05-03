@@ -108,6 +108,23 @@ def _insert_with_retry(sb, rows: list[dict]):
     raise last_exc
 
 
+def _filter_already_in_today(sb, today: str, rows: list[dict]) -> list[dict]:
+    """Drop rows whose cj_product_id already exists in queue_items for `today`.
+
+    Same-day reruns (manual workflow_dispatch after the morning cron, or a
+    cron retry) would otherwise insert duplicates with no unique constraint
+    to catch them. Existing rows are left untouched — pending stays pending,
+    approved stays approved with its shopify_product_id.
+    """
+    if not rows:
+        return rows
+    res = sb.table("queue_items").select("cj_product_id").eq("date", today).execute()
+    existing = {r["cj_product_id"] for r in (res.data or []) if r.get("cj_product_id")}
+    if not existing:
+        return rows
+    return [r for r in rows if r.get("cj_product_id") not in existing]
+
+
 def _supabase_client():
     """Return a Supabase client if credentials are configured, else None."""
     try:
@@ -219,8 +236,18 @@ def _run(today: str):
             }
             for p in enriched
         ]
-        _insert_with_retry(sb, rows)
-        print(f"[daily_research] Synced {len(rows)} items to Supabase.")
+        before = len(rows)
+        rows = _filter_already_in_today(sb, today, rows)
+        skipped = before - len(rows)
+        if skipped:
+            print(f"[daily_research] Skipped {skipped} cj_product_id(s) "
+                  f"already in queue_items for {today} (rerun)")
+        if rows:
+            _insert_with_retry(sb, rows)
+            print(f"[daily_research] Synced {len(rows)} items to Supabase.")
+        else:
+            print(f"[daily_research] All {before} researched products were "
+                  f"already in today's queue — nothing to insert.")
     else:
         print("[daily_research] No Supabase credentials — skipping cloud sync.")
         print("  Add SUPABASE_URL and SUPABASE_SERVICE_KEY to .env to enable dashboard.")
