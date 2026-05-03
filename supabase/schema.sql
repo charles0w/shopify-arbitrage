@@ -11,6 +11,7 @@ create table if not exists queue_items (
   keyword                  text,
   product_url              text,
   image_url                text,
+  image_urls               text[],
   listing_title            text,
   listing_body_html        text,
   listing_tags             text[],
@@ -52,3 +53,6 @@ begin
   alter table fulfillments add constraint fulfillments_status_check
     check (status in ('pending', 'cj_pending', 'cj_placed', 'shipped', 'error'));
 end $$;
+
+-- Migration: add image_urls (text[]) to queue_items if missing.
+alter table queue_items add column if not exists image_urls text[];

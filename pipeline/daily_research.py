@@ -147,6 +147,7 @@ def run():
                 "keyword": p.get("keyword", ""),
                 "product_url": p.get("product_url", ""),
                 "image_url": (p.get("image_urls") or [""])[0],
+                "image_urls": p.get("image_urls") or [],
                 "listing_title": p.get("listing_title"),
                 "listing_body_html": p.get("listing_body_html"),
                 "listing_tags": p.get("listing_tags", []),
