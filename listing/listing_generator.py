@@ -4,6 +4,7 @@ Returns: title, body_html, tags, meta_title, meta_description.
 """
 import anthropic
 from config.settings import ANTHROPIC_API_KEY
+from listing.sanitize import sanitize_html
 
 _client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
 
@@ -51,4 +52,6 @@ def generate_listing(product: dict) -> dict:
         text = text.split("```")[1]
         if text.startswith("json"):
             text = text[4:]
-    return json.loads(text.strip())
+    listing = json.loads(text.strip())
+    listing["body_html"] = sanitize_html(listing.get("body_html", ""))
+    return listing
