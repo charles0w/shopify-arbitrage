@@ -38,6 +38,7 @@ function Card({ item: init }: { item: QueueItem }) {
   const [item, setItem] = useState(init);
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
 
   async function act(action: "approve" | "reject") {
     setLoading(action);
@@ -108,6 +109,22 @@ function Card({ item: init }: { item: QueueItem }) {
             ${item.suggested_sale_price_usd.toFixed(2)} sale
           </span>
         </div>
+
+        {/* Listing preview toggle */}
+        {item.listing_body_html && (
+          <button
+            type="button"
+            onClick={() => setShowPreview((v) => !v)}
+            className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          >
+            {showPreview ? "▾ Hide preview" : "▸ Preview listing"}
+          </button>
+        )}
+        {showPreview && item.listing_body_html && (
+          <div className="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3 max-h-64 overflow-y-auto text-xs text-zinc-300 listing-preview">
+            <div dangerouslySetInnerHTML={{ __html: item.listing_body_html }} />
+          </div>
+        )}
 
         {/* Error */}
         {err && (
