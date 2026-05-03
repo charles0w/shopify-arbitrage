@@ -1,14 +1,18 @@
 """
 Auto-fulfillment loop.
 
-Run:  python -m fulfillment.loop
+Run continuously:    python -m fulfillment.loop
+Run a single tick:   python -m fulfillment.loop --once
 
-Every 15 minutes:
+Each tick:
   1. Fetch new paid+unfulfilled Shopify orders
   2. Resolve each line item → CJ variant ID via arbitrage.supplier_url metafield
   3. Place CJ order with customer shipping address
   4. Check pending CJ orders for tracking → push to Shopify when shipped
+
+Use --once for cron-style scheduling (e.g. GitHub Actions every 15 min).
 """
+import sys
 import time
 
 from fulfillment.order_monitor import (
@@ -120,22 +124,29 @@ def check_tracking():
             print(f"    CJ {cj_id}: not yet shipped")
 
 
+def run_once():
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{ts}] Polling...")
+    try:
+        fulfill_new_orders()
+    except Exception as exc:
+        print(f"  Error in order fulfillment: {exc}")
+    try:
+        check_tracking()
+    except Exception as exc:
+        print(f"  Error in tracking check: {exc}")
+
+
 def main():
     print("Auto-fulfillment loop running. Ctrl+C to stop.\n")
     while True:
-        ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        print(f"[{ts}] Polling...")
-        try:
-            fulfill_new_orders()
-        except Exception as exc:
-            print(f"  Error in order fulfillment: {exc}")
-        try:
-            check_tracking()
-        except Exception as exc:
-            print(f"  Error in tracking check: {exc}")
+        run_once()
         print(f"\n  Sleeping {POLL_INTERVAL // 60} min until next poll.")
         time.sleep(POLL_INTERVAL)
 
 
 if __name__ == "__main__":
-    main()
+    if "--once" in sys.argv:
+        run_once()
+    else:
+        main()
