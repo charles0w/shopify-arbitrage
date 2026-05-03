@@ -45,7 +45,7 @@ export type Fulfillment = {
   cj_order_id: string | null;
   tracking_number: string | null;
   carrier: string | null;
-  status: "pending" | "cj_placed" | "shipped" | "error";
+  status: "pending" | "cj_pending" | "cj_placed" | "shipped" | "error";
   error_message: string | null;
   created_at: string;
   updated_at: string;

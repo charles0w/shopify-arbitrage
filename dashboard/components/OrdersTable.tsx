@@ -52,6 +52,7 @@ const STATUS_MAP: Record<
   { label: string; dot: string; text: string }
 > = {
   pending: { label: "Pending CJ", dot: "bg-amber-500", text: "text-amber-400" },
+  cj_pending: { label: "Placing on CJ", dot: "bg-amber-500 animate-pulse", text: "text-amber-400" },
   cj_placed: { label: "CJ Placed", dot: "bg-indigo-500", text: "text-indigo-400" },
   shipped: { label: "Shipped", dot: "bg-emerald-500", text: "text-emerald-400" },
   error: { label: "Error", dot: "bg-rose-500", text: "text-rose-400" },

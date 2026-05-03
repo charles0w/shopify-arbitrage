@@ -31,10 +31,24 @@ create table if not exists fulfillments (
   cj_order_id          text,
   tracking_number      text,
   carrier              text,
-  status               text default 'pending' check (status in ('pending', 'cj_placed', 'shipped', 'error')),
+  status               text default 'pending' check (status in ('pending', 'cj_pending', 'cj_placed', 'shipped', 'error')),
   error_message        text,
   created_at           timestamptz default now(),
   updated_at           timestamptz default now()
 );
 
 create index if not exists fulfillments_status_idx on fulfillments (status);
+
+-- Migration: if you set up the schema before 'cj_pending' was added, run this
+-- to relax the status check. Safe to re-run.
+do $$
+begin
+  if exists (
+    select 1 from information_schema.constraint_column_usage
+    where constraint_name = 'fulfillments_status_check'
+  ) then
+    alter table fulfillments drop constraint fulfillments_status_check;
+  end if;
+  alter table fulfillments add constraint fulfillments_status_check
+    check (status in ('pending', 'cj_pending', 'cj_placed', 'shipped', 'error'));
+end $$;
