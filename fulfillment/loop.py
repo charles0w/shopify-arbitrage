@@ -25,10 +25,14 @@ from fulfillment.order_monitor import (
     mark_fulfilled,
     mark_error,
     mark_tracking_failed,
+    find_stuck_cj_pending,
+    mark_stuck_cj_pending,
     get_pending_tracking,
     drop_tracking_entry,
     push_tracking_to_shopify,
 )
+
+STUCK_CJ_PENDING_MINUTES = 30
 from fulfillment.cj_fulfiller import (
     get_cj_variants,
     get_cheapest_shipping,
@@ -183,6 +187,36 @@ def check_tracking():
             print(f"    CJ {cj_id}: not yet shipped")
 
 
+def sweep_stuck_cj_pending():
+    """Surface cj_pending rows that have been sitting too long.
+
+    A stuck row means mark_cj_pending wrote successfully but place_cj_order
+    or mark_fulfilled never completed (process killed, OOM, etc). The CJ
+    side may or may not have the order — operator must check CJ for an
+    order with our 'Shopify <name>' remark and reconcile manually.
+    """
+    stuck = find_stuck_cj_pending(threshold_minutes=STUCK_CJ_PENDING_MINUTES)
+    if not stuck:
+        return
+    print(f"\n  {len(stuck)} stuck cj_pending row(s) older than "
+          f"{STUCK_CJ_PENDING_MINUTES}min")
+    for row in stuck:
+        sid = row["shopify_order_id"]
+        name = row.get("shopify_order_name") or sid
+        msg = (
+            f"Stuck in cj_pending for >{STUCK_CJ_PENDING_MINUTES}min — "
+            f"check CJ for an order with remark 'Shopify {name}' and "
+            f"reconcile manually (set status='cj_placed' with cj_order_id, "
+            f"or 'error' if CJ never received it)."
+        )
+        try:
+            mark_stuck_cj_pending(sid, msg)
+            _alert(f":warning: Shopify {name}: {msg}")
+            print(f"    Alerted on stuck order {name}")
+        except Exception as exc:
+            print(f"    Failed to mark/alert stuck order {name}: {exc}")
+
+
 def run_once():
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] Polling...")
@@ -194,6 +228,10 @@ def run_once():
         check_tracking()
     except Exception as exc:
         print(f"  Error in tracking check: {exc}")
+    try:
+        sweep_stuck_cj_pending()
+    except Exception as exc:
+        print(f"  Error in stuck-row sweep: {exc}")
 
 
 def main():

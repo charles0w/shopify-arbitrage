@@ -6,6 +6,7 @@ State is persisted locally to fulfillment_state.json AND synced to Supabase
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import requests
@@ -302,6 +303,49 @@ def mark_tracking_failed(shopify_order_id: str, error_message: str) -> bool:
     )
 
     return prev != bounded
+
+
+def find_stuck_cj_pending(threshold_minutes: int = 30) -> list[dict]:
+    """Return cj_pending rows older than threshold that haven't been alerted yet.
+
+    cj_pending is written before place_cj_order. If the process dies after
+    the row write but before the CJ call (or before mark_fulfilled flips
+    status to cj_placed), the row stays cj_pending indefinitely. Without
+    this sweep there's no signal — Shopify shows paid+unfulfilled but our
+    duplicate-prevention guard skips the order on every subsequent tick.
+
+    Filters out rows that already have error_message set, so the alert
+    fires once per stuck order rather than every cron tick.
+    """
+    sb = _sb()
+    if not sb:
+        return []
+    cutoff = (datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)).isoformat()
+    res = _supabase_retry(
+        lambda: sb.table("fulfillments")
+        .select("shopify_order_id, shopify_order_name, created_at")
+        .eq("status", "cj_pending")
+        .is_("error_message", "null")
+        .lt("created_at", cutoff)
+        .execute(),
+        label="find_stuck_cj_pending",
+    )
+    return res.data or []
+
+
+def mark_stuck_cj_pending(shopify_order_id: str, message: str):
+    """Set error_message on a stuck cj_pending row so the dashboard surfaces it
+    and find_stuck_cj_pending stops returning it (alert dedup)."""
+    sb = _sb()
+    if not sb:
+        return
+    _supabase_retry(
+        lambda: sb.table("fulfillments").update({
+            "error_message": message[:500],
+            "updated_at": "now()",
+        }).eq("shopify_order_id", str(shopify_order_id)).execute(),
+        label=f"mark_stuck_cj_pending({shopify_order_id})",
+    )
 
 
 def push_tracking_to_shopify(shopify_order_id: str, tracking_number: str, carrier: str):
