@@ -151,6 +151,45 @@ def get_product_metafields(product_id: int) -> dict:
     }
 
 
+def mark_cj_pending(shopify_order_id: int, order: dict | None = None):
+    """Reserve a fulfillments row BEFORE calling place_cj_order.
+
+    Without this, a Supabase write failure between place_cj_order success
+    and mark_fulfilled would leave no record of the CJ order, and the next
+    stateless cron tick would re-attempt — creating a duplicate CJ order
+    and double-charging the operator.
+
+    With this row in place, the next tick's _load_state pulls it into
+    fulfilled_order_ids regardless of status, so the order is skipped on
+    retry. The trade-off: if mark_cj_pending succeeds but the process is
+    killed before place_cj_order even runs, the row stays as cj_pending
+    forever until the operator manually reconciles. Stuck rows are
+    recoverable (check CJ for an order with our remark, then patch the
+    row); duplicate orders are not.
+
+    Adds the Shopify order ID to local fulfilled_order_ids too so
+    long-running processes (`python -m fulfillment.loop` without --once)
+    don't double-process within the same run.
+    """
+    state = _load_state()
+    if str(shopify_order_id) not in state["fulfilled_order_ids"]:
+        state["fulfilled_order_ids"].append(str(shopify_order_id))
+    _save_state(state)
+
+    sb = _sb()
+    if sb:
+        row = {
+            "shopify_order_id": str(shopify_order_id),
+            "shopify_order_name": order.get("name", "") if order else "",
+            "shopify_order_total": float(order.get("total_price", 0)) if order else 0,
+            "status": "cj_pending",
+        }
+        _supabase_retry(
+            lambda: sb.table("fulfillments").upsert(row, on_conflict="shopify_order_id").execute(),
+            label=f"mark_cj_pending({shopify_order_id})",
+        )
+
+
 def mark_fulfilled(shopify_order_id: int, cj_order_id: str, order: dict | None = None):
     state = _load_state()
     state["fulfilled_order_ids"].append(str(shopify_order_id))

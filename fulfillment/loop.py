@@ -21,6 +21,7 @@ import requests
 from fulfillment.order_monitor import (
     get_new_orders,
     get_product_metafields,
+    mark_cj_pending,
     mark_fulfilled,
     mark_error,
     mark_tracking_failed,
@@ -119,6 +120,18 @@ def fulfill_new_orders():
             print(f"  {name} — {reason}")
             mark_error(order["id"], reason, order=order)
             _alert(f":warning: {name}: {reason}")
+            continue
+
+        # Reserve the row BEFORE calling place_cj_order so that even if the
+        # post-CJ Supabase write fails (mark_fulfilled), the next tick sees
+        # this order as already-attempted and won't duplicate it on CJ.
+        try:
+            mark_cj_pending(order["id"], order=order)
+        except Exception as exc:
+            # Supabase is unavailable — abort before touching CJ. Better to
+            # surface "fulfillment paused" than risk a duplicate later.
+            print(f"  FAILED to reserve cj_pending row for {name}: {exc}")
+            _alert(f":warning: {name}: cannot reserve fulfillment row — Supabase down? {exc}")
             continue
 
         try:
