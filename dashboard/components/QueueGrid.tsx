@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { QueueItem } from "@/lib/supabase";
 import Image from "next/image";
+import DOMPurify from "isomorphic-dompurify";
 
 type Status = QueueItem["status"];
 
@@ -39,6 +40,13 @@ function Card({ item: init }: { item: QueueItem }) {
   const [loading, setLoading] = useState<"approve" | "reject" | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
+  const safeBody = useMemo(
+    () =>
+      item.listing_body_html
+        ? DOMPurify.sanitize(item.listing_body_html, { USE_PROFILES: { html: true } })
+        : "",
+    [item.listing_body_html]
+  );
 
   async function act(action: "approve" | "reject") {
     setLoading(action);
@@ -120,9 +128,9 @@ function Card({ item: init }: { item: QueueItem }) {
             {showPreview ? "▾ Hide preview" : "▸ Preview listing"}
           </button>
         )}
-        {showPreview && item.listing_body_html && (
+        {showPreview && safeBody && (
           <div className="bg-zinc-950/60 border border-zinc-800 rounded-lg p-3 max-h-64 overflow-y-auto text-xs text-zinc-300 listing-preview">
-            <div dangerouslySetInnerHTML={{ __html: item.listing_body_html }} />
+            <div dangerouslySetInnerHTML={{ __html: safeBody }} />
           </div>
         )}
 
