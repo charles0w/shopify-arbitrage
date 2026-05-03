@@ -24,6 +24,9 @@ export default async function OrdersPage() {
 
   const paid = orders.filter((o) => o.financial_status === "paid");
   const shipped = orders.filter((o) => o.fulfillment?.status === "shipped");
+  const pendingFulfillment = paid.filter(
+    (o) => o.fulfillment?.status !== "shipped"
+  );
   const revenue = paid.reduce((s, o) => s + parseFloat(o.total_price || "0"), 0);
 
   return (
@@ -36,9 +39,14 @@ export default async function OrdersPage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         <StatCard label="Total Orders" value={orders.length} />
         <StatCard label="Paid" value={paid.length} />
+        <StatCard
+          label="Pending Fulfillment"
+          value={pendingFulfillment.length}
+          highlight={pendingFulfillment.length > 0}
+        />
         <StatCard label="Shipped" value={shipped.length} />
         <StatCard label="Revenue" value={`$${revenue.toFixed(2)}`} />
       </div>
@@ -48,13 +56,25 @@ export default async function OrdersPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: number | string }) {
+function StatCard({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: number | string;
+  highlight?: boolean;
+}) {
   return (
     <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-5 py-4">
       <p className="text-xs text-zinc-500 font-medium uppercase tracking-wide">
         {label}
       </p>
-      <p className="text-3xl font-semibold mt-1 tabular-nums text-zinc-100">
+      <p
+        className={`text-3xl font-semibold mt-1 tabular-nums ${
+          highlight ? "text-indigo-400" : "text-zinc-100"
+        }`}
+      >
         {value}
       </p>
     </div>
