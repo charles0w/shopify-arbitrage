@@ -181,8 +181,38 @@ def update_tracking_in_supabase(shopify_order_id: str, tracking_number: str, car
             "tracking_number": tracking_number,
             "carrier": carrier,
             "status": "shipped",
+            "error_message": None,  # clear stale tracking-push error if any
             "updated_at": "now()",
         }).eq("shopify_order_id", shopify_order_id).execute()
+
+
+def mark_tracking_failed(shopify_order_id: str, error_message: str) -> bool:
+    """Record that we couldn't push tracking back to Shopify even though CJ has
+    shipped. Keeps status='cj_placed' (the CJ order itself is fine — it's the
+    Shopify-side fulfillment write that failed) but sets error_message so the
+    dashboard surfaces it.
+
+    Returns True if this is a new failure (error_message was previously empty
+    or different) so the caller can decide whether to alert. Avoids re-alerting
+    on every cron tick for the same persistent failure.
+    """
+    sb = _sb()
+    if not sb:
+        return True  # no Supabase, can't dedupe — alert each time
+
+    bounded = error_message[:500]
+    existing = sb.table("fulfillments").select("error_message").eq(
+        "shopify_order_id", str(shopify_order_id)
+    ).limit(1).execute()
+    rows = existing.data or []
+    prev = rows[0].get("error_message") if rows else None
+
+    sb.table("fulfillments").update({
+        "error_message": bounded,
+        "updated_at": "now()",
+    }).eq("shopify_order_id", str(shopify_order_id)).execute()
+
+    return prev != bounded
 
 
 def push_tracking_to_shopify(shopify_order_id: str, tracking_number: str, carrier: str):

@@ -23,6 +23,7 @@ from fulfillment.order_monitor import (
     get_product_metafields,
     mark_fulfilled,
     mark_error,
+    mark_tracking_failed,
     get_pending_tracking,
     drop_tracking_entry,
     push_tracking_to_shopify,
@@ -155,7 +156,16 @@ def check_tracking():
                 drop_tracking_entry(cj_id)
                 print(f"    Tracking pushed to Shopify order {shopify_id} ✓")
             except Exception as exc:
+                msg = f"tracking push failed: {exc}"
                 print(f"    Failed to push tracking to Shopify: {exc}")
+                # Pending tracking entry stays in place — next tick will retry
+                # the push automatically. Surface to the dashboard, and alert
+                # only on the first failure (or when the message changes).
+                if mark_tracking_failed(shopify_id, msg):
+                    _alert(
+                        f":warning: Shopify {shopify_id}: tracking push failed "
+                        f"(CJ {cj_id} is shipped, customer hasn't been notified): {exc}"
+                    )
         else:
             print(f"    CJ {cj_id}: not yet shipped")
 
