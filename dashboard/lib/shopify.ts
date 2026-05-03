@@ -79,6 +79,15 @@ export async function createDraft(item: QueueItem) {
           value: String(item.supplier_price_usd),
           type: "single_line_text_field",
         },
+        {
+          // Recovery key: if a Supabase update fails after this product is
+          // created, we can find the orphan by filtering Shopify products on
+          // this metafield and reconcile manually.
+          namespace: "arbitrage",
+          key: "queue_item_id",
+          value: item.id,
+          type: "single_line_text_field",
+        },
       ],
     },
   };
