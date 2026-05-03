@@ -24,8 +24,41 @@ _STATE = Path(__file__).parent.parent / "fulfillment_state.json"
 def _load_state() -> dict:
     if _STATE.exists():
         with open(_STATE) as f:
-            return json.load(f)
-    return {"fulfilled_order_ids": [], "pending_tracking": []}
+            state = json.load(f)
+    else:
+        state = {"fulfilled_order_ids": [], "pending_tracking": []}
+
+    # In stateless environments (e.g. GitHub Actions) the local file is empty
+    # on every run. Use Supabase as the source of truth so we don't re-place
+    # CJ orders that are still in the cj-placed-but-not-shipped window, and
+    # so check_tracking() can resume polling for shipments.
+    sb = _sb()
+    if sb:
+        try:
+            res = sb.table("fulfillments").select(
+                "shopify_order_id, cj_order_id, status"
+            ).execute()
+            rows = res.data or []
+            ids = {r["shopify_order_id"] for r in rows if r.get("shopify_order_id")}
+            ids.update(str(i) for i in state["fulfilled_order_ids"])
+            state["fulfilled_order_ids"] = list(ids)
+
+            local_pending_cj = {p["cj_order_id"] for p in state["pending_tracking"]}
+            for r in rows:
+                if (
+                    r.get("status") == "cj_placed"
+                    and r.get("cj_order_id")
+                    and r["cj_order_id"] not in local_pending_cj
+                ):
+                    state["pending_tracking"].append({
+                        "shopify_order_id": r["shopify_order_id"],
+                        "cj_order_id": r["cj_order_id"],
+                        "submitted_at": 0,
+                    })
+        except Exception as exc:
+            print(f"[order_monitor] Supabase state merge failed: {exc}")
+
+    return state
 
 
 def _save_state(state: dict):

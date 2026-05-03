@@ -1,0 +1,41 @@
+name: Daily research
+
+# Runs the niche research pipeline daily and posts the queue to Supabase
+# (and a digest webhook if DIGEST_WEBHOOK_URL is set).
+#
+# Required GitHub secrets:
+#   SHOPIFY_STORE_URL, SHOPIFY_ACCESS_TOKEN
+#   ANTHROPIC_API_KEY
+#   CJ_API_KEY
+#   SUPABASE_URL, SUPABASE_SERVICE_KEY   (so the dashboard sees the queue)
+# Optional:
+#   DIGEST_WEBHOOK_URL, DASHBOARD_URL    (for Slack/Discord summary)
+
+on:
+  schedule:
+    - cron: "0 9 * * *"  # 09:00 UTC daily
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - run: python -m pipeline.daily_research
+        env:
+          SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
+          SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          DIGEST_WEBHOOK_URL: ${{ secrets.DIGEST_WEBHOOK_URL }}
+          DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
