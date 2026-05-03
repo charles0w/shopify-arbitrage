@@ -22,9 +22,14 @@ _BASE = "https://developers.cjdropshipping.com/api2.0/v1"
 _CACHE = Path(__file__).parent.parent / ".cj_token_cache.json"
 
 
-def _get_token() -> str:
-    """Return a valid CJ access token, refreshing if expired."""
-    if _CACHE.exists():
+def _get_token(force_refresh: bool = False) -> str:
+    """Return a valid CJ access token, refreshing if expired or if forced.
+
+    The 14-day cache is optimistic — CJ has been observed to reject tokens
+    sooner. Callers that get an auth error from a CJ endpoint should retry
+    once with force_refresh=True before giving up.
+    """
+    if not force_refresh and _CACHE.exists():
         with open(_CACHE) as f:
             cached = json.load(f)
         if time.time() < cached.get("expires_at", 0) - 300:
@@ -52,8 +57,30 @@ def _get_token() -> str:
     return token_data["accessToken"]
 
 
-def _headers() -> dict:
-    return {"CJ-Access-Token": _get_token()}
+def _headers(force_refresh: bool = False) -> dict:
+    return {"CJ-Access-Token": _get_token(force_refresh=force_refresh)}
+
+
+_AUTH_ERROR_KEYWORDS = ("token", "auth", "unauthorized", "expired", "invalid access")
+
+
+def _is_auth_error(resp_or_data) -> bool:
+    """Detect whether a CJ response indicates a stale/invalid token."""
+    if hasattr(resp_or_data, "status_code"):
+        if resp_or_data.status_code in (401, 403):
+            return True
+        try:
+            data = resp_or_data.json()
+        except Exception:
+            return False
+    else:
+        data = resp_or_data
+    if not isinstance(data, dict):
+        return False
+    if data.get("result"):
+        return False
+    msg = str(data.get("message", "")).lower()
+    return any(k in msg for k in _AUTH_ERROR_KEYWORDS)
 
 
 def search_products(keyword: str, max_results: int = 20) -> list[dict]:

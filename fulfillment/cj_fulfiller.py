@@ -3,7 +3,7 @@ Place orders on CJDropshipping and poll for tracking numbers.
 Reuses the auth token from research/aliexpress_fetcher.py.
 """
 import requests
-from research.aliexpress_fetcher import _headers, _BASE
+from research.aliexpress_fetcher import _headers, _is_auth_error, _BASE
 
 
 def get_cj_variants(pid: str) -> list[dict]:
@@ -82,12 +82,19 @@ def place_cj_order(shopify_order: dict, cj_items: list[dict]) -> str:
         "remark": f"Shopify {shopify_order.get('name', shopify_order['id'])}",
     }
 
-    resp = requests.post(
-        f"{_BASE}/shopping/order/createOrder",
-        headers=_headers(),
-        json=payload,
-        timeout=30,
-    )
+    def _post(force_refresh: bool):
+        return requests.post(
+            f"{_BASE}/shopping/order/createOrder",
+            headers=_headers(force_refresh=force_refresh),
+            json=payload,
+            timeout=30,
+        )
+
+    resp = _post(force_refresh=False)
+    if _is_auth_error(resp):
+        # Cached token rejected — refresh once and retry.
+        resp = _post(force_refresh=True)
+
     resp.raise_for_status()
     data = resp.json()
 
