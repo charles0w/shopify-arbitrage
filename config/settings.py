@@ -11,6 +11,11 @@ ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 MIN_SCORE = 0.40
 MAX_QUEUE_SIZE = 10
 
+# Hard quality gates applied after scoring — products that don't clear these
+# are dropped even if their score is above MIN_SCORE.
+MIN_SALE_PRICE = 8.0   # anything cheaper looks like spam on Shopify
+MIN_PROFIT_USD = 4.50  # minimum dollar gross margin per unit sold
+
 # Markup multipliers by supplier cost tier
 MARKUP = {
     5: 4.0,   # cost < $5

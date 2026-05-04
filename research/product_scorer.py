@@ -11,7 +11,10 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config.settings import WEIGHTS, MIN_SCORE, MARKUP, DEFAULT_MARKUP, NICHES
+from config.settings import (
+    WEIGHTS, MIN_SCORE, MARKUP, DEFAULT_MARKUP, NICHES,
+    MIN_SALE_PRICE, MIN_PROFIT_USD,
+)
 from research.trend_fetcher import trend_score
 from research.aliexpress_fetcher import search_products, get_product_detail
 
@@ -50,8 +53,12 @@ def _weight_score(weight_lbs: float | None) -> float:
     return round(1.0 - (weight_lbs - 0.5) / 2.5, 4)
 
 
-def score_product(product: dict, keyword: str) -> dict:
-    """Score a single product. Enriches with detail if weight is missing."""
+def score_product(product: dict, keyword: str, _trend: float | None = None) -> dict:
+    """Score a single product. Enriches with detail if weight is missing.
+
+    Pass _trend to reuse a precomputed trend score (avoids duplicate pytrends
+    calls when scoring many products for the same niche keyword).
+    """
     if product.get("shipping_weight_lbs") is None and product.get("id"):
         try:
             detail = get_product_detail(product["id"])
@@ -62,7 +69,7 @@ def score_product(product: dict, keyword: str) -> dict:
         except Exception:
             pass
 
-    trend = trend_score(keyword)
+    trend = _trend if _trend is not None else trend_score(keyword)
     margin = _margin_gap_score(product.get("supplier_price_usd", 0))
     reviews = _review_score(
         product.get("orders_count", 0), product.get("review_count", 0)
@@ -94,11 +101,35 @@ def score_product(product: dict, keyword: str) -> dict:
     }
 
 
-def research_niche(keyword: str, max_products: int = 20) -> list[dict]:
-    """Fetch + score all products for a keyword. Return those above MIN_SCORE, ranked."""
+def research_niche(keyword: str, max_products: int = 25) -> list[dict]:
+    """Fetch + score products for a keyword. Return those above MIN_SCORE that
+    also clear the hard quality gates (MIN_SALE_PRICE, MIN_PROFIT_USD), ranked."""
     products = search_products(keyword, max_results=max_products)
-    scored = [score_product(p, keyword) for p in products]
-    qualified = [p for p in scored if p["score"] >= MIN_SCORE]
+
+    # Prioritise products with proven demand so the top_n we keep are the
+    # best-selling candidates, not just the first ones CJ happens to return.
+    products.sort(key=lambda p: p.get("orders_count", 0), reverse=True)
+
+    # Compute trend once — all products share the same niche keyword, so
+    # calling trend_score per product would just hammer pytrends needlessly.
+    niche_trend = trend_score(keyword)
+
+    scored = [score_product(p, keyword, _trend=niche_trend) for p in products]
+
+    qualified = []
+    for p in scored:
+        if p["score"] < MIN_SCORE:
+            continue
+        sale = p["suggested_sale_price_usd"]
+        profit = sale - p["supplier_price_usd"]
+        if sale < MIN_SALE_PRICE:
+            print(f"    [skip] ${sale:.2f} sale < ${MIN_SALE_PRICE:.2f} min — '{p['title'][:55]}'")
+            continue
+        if profit < MIN_PROFIT_USD:
+            print(f"    [skip] ${profit:.2f} profit < ${MIN_PROFIT_USD:.2f} min — '{p['title'][:55]}'")
+            continue
+        qualified.append(p)
+
     return sorted(qualified, key=lambda x: x["score"], reverse=True)
 
 
@@ -108,7 +139,7 @@ def research_all_niches(top_n: int = 3) -> list[dict]:
     results = []
     for i, niche in enumerate(NICHES):
         print(f"  [{i+1}/{len(NICHES)}] researching: {niche}")
-        niche_results = research_niche(niche, max_products=10)
+        niche_results = research_niche(niche, max_products=25)
         results.extend(niche_results[:top_n])
         if i < len(NICHES) - 1:
             time.sleep(30)  # stay within RapidAPI free tier rate limit
