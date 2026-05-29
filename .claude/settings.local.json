@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git pull *)",
+      "Bash(python *)",
+      "Bash(pip install *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(npx *)",
+      "Bash(gh secret *)",
+      "Bash(gh auth *)",
+      "Bash(gh workflow *)",
+      "Bash(gh run *)",
+      "Bash(git push *)",
+      "Bash(vercel *)",
+      "mcp__plugin_vercel_vercel__list_teams",
+      "mcp__plugin_vercel_vercel__list_projects"
+    ]
+  }
+}

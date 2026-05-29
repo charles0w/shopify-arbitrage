@@ -160,7 +160,7 @@ def get_order_tracking(cj_order_id: str) -> dict | None:
     order = data.get("data", {})
     status = order.get("orderStatus", "")
 
-    if status in ("SHIIPPED", "SHIPPED", "DELIVERED", "IN_TRANSIT"):
+    if status in ("SHIPPED", "DELIVERED", "IN_TRANSIT"):
         track = order.get("trackNumber") or order.get("trackingNumber", "")
         if track:
             return {
