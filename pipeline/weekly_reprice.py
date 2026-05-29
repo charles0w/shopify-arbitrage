@@ -22,6 +22,7 @@ from listing.shopify_publisher import (
     get_product_metafields,
 )
 from config.settings import MARKUP, DEFAULT_MARKUP
+from config import ceo_report
 
 _RETRY_BACKOFF_S = (1, 3, 8)
 
@@ -62,8 +63,9 @@ def _update_price_with_retry(product_id: int, variant_id: int, new_price: float)
 
 
 def run():
+    started = time.monotonic()
     try:
-        return _run()
+        result = _run()
     except Exception as exc:
         tb = traceback.format_exc()
         summary = str(exc).splitlines()[0][:200] if str(exc) else type(exc).__name__
@@ -72,7 +74,20 @@ def run():
             f"{type(exc).__name__}: {summary}\n"
             f"```\n{tb[-1500:]}\n```"
         )
+        ceo_report.report(
+            "error",
+            f"weekly reprice failed: {type(exc).__name__}: {summary[:120]}",
+            ok=False,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         raise
+    ceo_report.report(
+        "ok",
+        f"reprice — {result['updated']} repriced, {result['failed']} failed, "
+        f"{result['skipped']} skipped",
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
+    return result
 
 
 def _run():

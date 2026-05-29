@@ -23,6 +23,7 @@ import requests
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from config.settings import MAX_QUEUE_SIZE
+from config import ceo_report
 from research.product_scorer import research_all_niches
 from listing.listing_generator import generate_listing
 from auth.shopify_token import get_token
@@ -140,11 +141,25 @@ def _supabase_client():
 
 def run():
     today = date.today().isoformat()
+    started = time.monotonic()
     try:
-        return _run(today)
+        enriched = _run(today)
     except Exception as exc:
         _post_failure_alert(today, exc)
+        ceo_report.report(
+            "error",
+            f"daily research failed: {type(exc).__name__}: "
+            f"{str(exc).splitlines()[0][:120]}",
+            ok=False,
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
         raise  # re-raise so the GH Actions job is marked failed too
+    ceo_report.report(
+        "ok",
+        f"{len(enriched)} products queued for {today}",
+        duration_ms=int((time.monotonic() - started) * 1000),
+    )
+    return enriched
 
 
 def _run(today: str):

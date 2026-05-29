@@ -18,6 +18,7 @@ import time
 
 import requests
 
+from config import ceo_report
 from fulfillment.order_monitor import (
     get_new_orders,
     get_product_metafields,
@@ -220,18 +221,30 @@ def sweep_stuck_cj_pending():
 def run_once():
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
     print(f"[{ts}] Polling...")
+    started = time.monotonic()
+    errors: list[str] = []
     try:
         fulfill_new_orders()
     except Exception as exc:
         print(f"  Error in order fulfillment: {exc}")
+        errors.append(f"fulfill: {type(exc).__name__}: {exc}")
     try:
         check_tracking()
     except Exception as exc:
         print(f"  Error in tracking check: {exc}")
+        errors.append(f"tracking: {type(exc).__name__}: {exc}")
     try:
         sweep_stuck_cj_pending()
     except Exception as exc:
         print(f"  Error in stuck-row sweep: {exc}")
+        errors.append(f"sweep: {type(exc).__name__}: {exc}")
+
+    duration_ms = int((time.monotonic() - started) * 1000)
+    if errors:
+        ceo_report.report("error", "; ".join(errors), ok=False,
+                          duration_ms=duration_ms)
+    else:
+        ceo_report.report("ok", "fulfillment tick clean", duration_ms=duration_ms)
 
 
 def main():

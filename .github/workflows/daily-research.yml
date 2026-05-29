@@ -39,3 +39,4 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           DIGEST_WEBHOOK_URL: ${{ secrets.DIGEST_WEBHOOK_URL }}
           DASHBOARD_URL: ${{ secrets.DASHBOARD_URL }}
+          CEOS_REPORT_SECRET: ${{ secrets.CEOS_REPORT_SECRET }}

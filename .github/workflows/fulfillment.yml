@@ -45,3 +45,4 @@ jobs:
           CJ_API_KEY: ${{ secrets.CJ_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          CEOS_REPORT_SECRET: ${{ secrets.CEOS_REPORT_SECRET }}
