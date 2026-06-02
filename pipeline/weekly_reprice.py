@@ -16,13 +16,22 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from listing.shopify_publisher import (
-    list_active_products,
-    update_price,
-    get_product_metafields,
-)
-from config.settings import MARKUP, DEFAULT_MARKUP
 from config import ceo_report
+
+try:
+    from listing.shopify_publisher import (
+        list_active_products,
+        update_price,
+        get_product_metafields,
+    )
+    from config.settings import MARKUP, DEFAULT_MARKUP
+except Exception as _startup_err:
+    ceo_report.report(
+        "error",
+        f"startup failed: {type(_startup_err).__name__}: {str(_startup_err).splitlines()[0][:120]}",
+        ok=False,
+    )
+    raise
 
 _RETRY_BACKOFF_S = (1, 3, 8)
 

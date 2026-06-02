@@ -19,27 +19,34 @@ import time
 import requests
 
 from config import ceo_report
-from fulfillment.order_monitor import (
-    get_new_orders,
-    get_product_metafields,
-    mark_cj_pending,
-    mark_fulfilled,
-    mark_error,
-    mark_tracking_failed,
-    find_stuck_cj_pending,
-    mark_stuck_cj_pending,
-    get_pending_tracking,
-    drop_tracking_entry,
-    push_tracking_to_shopify,
-)
 
-STUCK_CJ_PENDING_MINUTES = 30
-from fulfillment.cj_fulfiller import (
-    get_cj_variants,
-    get_cheapest_shipping,
-    place_cj_order,
-    get_order_tracking,
-)
+try:
+    from fulfillment.order_monitor import (
+        get_new_orders,
+        get_product_metafields,
+        mark_cj_pending,
+        mark_fulfilled,
+        mark_error,
+        mark_tracking_failed,
+        find_stuck_cj_pending,
+        mark_stuck_cj_pending,
+        get_pending_tracking,
+        drop_tracking_entry,
+        push_tracking_to_shopify,
+    )
+    from fulfillment.cj_fulfiller import (
+        get_cj_variants,
+        get_cheapest_shipping,
+        place_cj_order,
+        get_order_tracking,
+    )
+except Exception as _startup_err:
+    ceo_report.report(
+        "error",
+        f"startup failed: {type(_startup_err).__name__}: {str(_startup_err).splitlines()[0][:120]}",
+        ok=False,
+    )
+    raise
 
 POLL_INTERVAL = 900  # 15 minutes
 

@@ -22,11 +22,20 @@ import requests
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from config.settings import MAX_QUEUE_SIZE
 from config import ceo_report
-from research.product_scorer import research_all_niches
-from listing.listing_generator import generate_listing
-from auth.shopify_token import get_token
+
+try:
+    from config.settings import MAX_QUEUE_SIZE
+    from research.product_scorer import research_all_niches
+    from listing.listing_generator import generate_listing
+    from auth.shopify_token import get_token
+except Exception as _startup_err:
+    ceo_report.report(
+        "error",
+        f"startup failed: {type(_startup_err).__name__}: {str(_startup_err).splitlines()[0][:120]}",
+        ok=False,
+    )
+    raise
 
 QUEUE_DIR = Path(__file__).parent.parent / "queue"
 QUEUE_DIR.mkdir(exist_ok=True)
