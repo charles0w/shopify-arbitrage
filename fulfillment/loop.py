@@ -49,6 +49,7 @@ except Exception as _startup_err:
     raise
 
 POLL_INTERVAL = 900  # 15 minutes
+STUCK_CJ_PENDING_MINUTES = 30  # matches find_stuck_cj_pending's default
 
 
 def _alert(message: str):
@@ -72,11 +73,21 @@ def _cj_pid_from_url(supplier_url: str) -> str | None:
         return None
 
 
-def fulfill_new_orders():
+def fulfill_new_orders() -> tuple[int, float, float, list[str]]:
+    """Fulfill paid+unfulfilled orders.
+
+    Returns (fulfilled_count, gmv, realized_margin, margin_notes) for the
+    tick report. realized_margin = Shopify revenue − CJ charge, summed over
+    orders whose CJ amount came back — the realized (gross-of-fees) profit
+    this tick. Each order passes here at most once (cj_pending reservation),
+    so reporting it as Garage profit can't double-count.
+    """
+    fulfilled, gmv, realized = 0, 0.0, 0.0
+    notes: list[str] = []
     orders = get_new_orders()
     if not orders:
         print("  No new orders.")
-        return
+        return fulfilled, gmv, realized, notes
 
     for order in orders:
         name = order.get("name", order["id"])
@@ -147,19 +158,29 @@ def fulfill_new_orders():
             continue
 
         try:
-            cj_order_id = place_cj_order(order, cj_items)
+            cj_order_id, cj_amount = place_cj_order(order, cj_items)
             mark_fulfilled(order["id"], cj_order_id, order=order)
             print(f"  CJ order created: {cj_order_id}")
+            fulfilled += 1
+            revenue = float(order.get("total_price", 0) or 0)
+            gmv += revenue
+            if cj_amount is not None and revenue > 0:
+                margin = revenue - cj_amount
+                realized += margin
+                notes.append(f"{name} {'+' if margin >= 0 else ''}${margin:.2f}")
         except Exception as exc:
             print(f"  FAILED to place CJ order for {name}: {exc}")
             mark_error(order["id"], str(exc), order=order)
             _alert(f":warning: CJ order failed for Shopify {name}: {exc}")
 
+    return fulfilled, gmv, realized, notes
 
-def check_tracking():
+
+def check_tracking() -> int:
+    """Push fresh CJ tracking to Shopify. Returns the in-flight count."""
     pending = get_pending_tracking()
     if not pending:
-        return
+        return 0
 
     print(f"\n  Checking tracking for {len(pending)} CJ order(s)...")
     for entry in pending:
@@ -193,6 +214,8 @@ def check_tracking():
                     )
         else:
             print(f"    CJ {cj_id}: not yet shipped")
+
+    return len(pending)
 
 
 def sweep_stuck_cj_pending():
@@ -230,13 +253,16 @@ def run_once():
     print(f"[{ts}] Polling...")
     started = time.monotonic()
     errors: list[str] = []
+    fulfilled, gmv, realized = 0, 0.0, 0.0
+    margin_notes: list[str] = []
+    in_flight = 0
     try:
-        fulfill_new_orders()
+        fulfilled, gmv, realized, margin_notes = fulfill_new_orders()
     except Exception as exc:
         print(f"  Error in order fulfillment: {exc}")
         errors.append(f"fulfill: {type(exc).__name__}: {exc}")
     try:
-        check_tracking()
+        in_flight = check_tracking()
     except Exception as exc:
         print(f"  Error in tracking check: {exc}")
         errors.append(f"tracking: {type(exc).__name__}: {exc}")
@@ -247,11 +273,27 @@ def run_once():
         errors.append(f"sweep: {type(exc).__name__}: {exc}")
 
     duration_ms = int((time.monotonic() - started) * 1000)
+    metrics = [
+        {"label": "Fulfilled · tick", "value": fulfilled},
+        {"label": "In flight", "value": in_flight},
+        {"label": "GMV · tick", "value": round(gmv, 2), "money": True},
+    ]
+    # Realized margin funds The Garage. Orders fulfilled before an error
+    # later in the tick are still realized — report profit either way.
+    profit_kwargs = {}
+    if realized != 0.0:
+        profit_kwargs = {
+            "profit": round(realized, 2),
+            "profit_note": ("gross margin: " + "; ".join(margin_notes))[:200],
+        }
     if errors:
         ceo_report.report("error", "; ".join(errors), ok=False,
-                          duration_ms=duration_ms)
+                          duration_ms=duration_ms, metrics=metrics, **profit_kwargs)
     else:
-        ceo_report.report("ok", "fulfillment tick clean", duration_ms=duration_ms)
+        summary = (f"fulfilled {fulfilled} order(s) · {in_flight} in flight"
+                   if fulfilled else "fulfillment tick clean")
+        ceo_report.report("ok", summary, duration_ms=duration_ms,
+                          metrics=metrics, **profit_kwargs)
 
 
 def main():

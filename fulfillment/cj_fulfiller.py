@@ -89,9 +89,12 @@ def get_cheapest_shipping(vid: str, country_code: str = "US") -> str:
     return name
 
 
-def place_cj_order(shopify_order: dict, cj_items: list[dict]) -> str:
+def place_cj_order(shopify_order: dict, cj_items: list[dict]) -> tuple[str, float | None]:
     """
-    Place a CJDropshipping order. Returns the CJ order ID.
+    Place a CJDropshipping order. Returns (CJ order ID, CJ order amount).
+
+    The amount is what CJ charges us (product + shipping) — the supplier
+    cost side of the realized margin. None when the API omits it.
 
     cj_items: list of {vid, quantity, shipping_name}
     shopify_order: full Shopify order dict (needs shipping_address)
@@ -137,7 +140,13 @@ def place_cj_order(shopify_order: dict, cj_items: list[dict]) -> str:
     if not data.get("result"):
         raise RuntimeError(f"CJ order creation failed: {data.get('message')}")
 
-    return data["data"]["orderId"]
+    d = data["data"]
+    raw_amount = d.get("orderAmount", d.get("amount"))
+    try:
+        amount = float(raw_amount) if raw_amount is not None else None
+    except (TypeError, ValueError):
+        amount = None
+    return d["orderId"], amount
 
 
 def get_order_tracking(cj_order_id: str) -> dict | None:

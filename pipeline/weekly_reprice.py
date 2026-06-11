@@ -95,6 +95,11 @@ def run():
         f"reprice — {result['updated']} repriced, {result['failed']} failed, "
         f"{result['skipped']} skipped",
         duration_ms=int((time.monotonic() - started) * 1000),
+        metrics=[
+            {"label": "Repriced", "value": result["updated"]},
+            {"label": "Failed", "value": result["failed"]},
+            {"label": "Skipped", "value": result["skipped"]},
+        ],
     )
     return result
 

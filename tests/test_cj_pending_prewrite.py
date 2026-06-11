@@ -108,7 +108,7 @@ def test_loop_calls_pending_before_place(tmp_path, monkeypatch):
          patch.object(loop, "get_cj_variants", return_value=[{"vid": "v1"}]), \
          patch.object(loop, "get_cheapest_shipping", return_value="CJPacket"), \
          patch.object(loop, "mark_cj_pending", side_effect=lambda *a, **k: call_order.append("pending")), \
-         patch.object(loop, "place_cj_order", side_effect=lambda *a, **k: call_order.append("place") or "CJ-X"), \
+         patch.object(loop, "place_cj_order", side_effect=lambda *a, **k: call_order.append("place") or ("CJ-X", 2.5)), \
          patch.object(loop, "mark_fulfilled", side_effect=lambda *a, **k: call_order.append("fulfilled")), \
          patch.object(loop, "_alert"):
         loop.fulfill_new_orders()

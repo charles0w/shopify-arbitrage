@@ -167,6 +167,7 @@ def run():
         "ok",
         f"{len(enriched)} products queued for {today}",
         duration_ms=int((time.monotonic() - started) * 1000),
+        metrics=[{"label": "Queued today", "value": len(enriched)}],
     )
     return enriched
 
