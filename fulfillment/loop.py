@@ -19,6 +19,7 @@ import time
 import requests
 
 from config import ceo_report
+from config import fleet_tasks
 
 try:
     from fulfillment.order_monitor import (
@@ -286,13 +287,18 @@ def run_once():
             "profit": round(realized, 2),
             "profit_note": ("gross margin: " + "; ".join(margin_notes))[:200],
         }
+    # Surface the CEO's delegation queue on the dashboard card. The tick
+    # can't execute arbitrary tasks — a working session in this repo does
+    # (python -m config.fleet_tasks list / start / done).
+    queued = fleet_tasks.queued_count()
+    queue_note = f" · {queued} CEO task(s) queued" if queued else ""
     if errors:
-        ceo_report.report("error", "; ".join(errors), ok=False,
+        ceo_report.report("error", "; ".join(errors) + queue_note, ok=False,
                           duration_ms=duration_ms, metrics=metrics, **profit_kwargs)
     else:
         summary = (f"fulfilled {fulfilled} order(s) · {in_flight} in flight"
                    if fulfilled else "fulfillment tick clean")
-        ceo_report.report("ok", summary, duration_ms=duration_ms,
+        ceo_report.report("ok", summary + queue_note, duration_ms=duration_ms,
                           metrics=metrics, **profit_kwargs)
 
 
